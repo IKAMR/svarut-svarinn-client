@@ -4,17 +4,23 @@
 | --- | --- |
 | `run.py`, `__main__.py` | Oppstart, argumenter, instanslås, GUI/lokal kontroll |
 | `__init__.py` | Autoritativ versjon |
-| `core/paths.py` | Per-bruker datamappe og avgrensning mot repoet |
-| `core/storage.py` | Begrenset JSON-lesing, atomisk skriving, OS-lås |
-| `core/config.py` | Oppsettskjema og endringskonflikt |
-| `core/readiness.py` | Lokal utfyllingskontroll og testadresse-policy |
-| `core/activity.py` | Faste, dataminimerte aktivitetshendelser |
-| `core/services.py` | Felles app-tjenester og sperret KS-grense |
-| `ui/app.py` | Ett hovedvindu, faner, felt og handlinger |
+| `core/paths.py`, `core/storage.py` | Per-bruker datamappe, JSON, atomisk lagring og OS-lås |
+| `core/config.py` | Strengt skjema 2, lesing av skjema 1, endringskonflikt |
+| `core/readiness.py` | Lokal utfyllings-/filkontroll, aldri nettverk |
+| `core/activity.py` | Faste dataminimerte hendelser |
+| `core/services.py` | Felles applikasjonstjeneste for oppsett, logg og KS-operasjoner |
+| `core/network.py` | HTTPS, testverts-/operasjonspolicy, grenser og skjermede feil |
+| `core/auth.py` | Økthemmeligheter, RSA/RS256 JWT grant, Maskinporten og tokencache |
+| `core/ks_api.py` | SvarInn-liste, Send V3 multipart, Status V3 og sendetilstand |
+| `core/outbox.py` | Lokal SQLite-journal, referanser, duplikatsperre og restart |
+| `ui/app.py` | Hovedvindu, Oppsett, øktpassord, lokal kontroll og aktivitet |
+| `ui/api_views.py` | SvarUt/SvarInn-flater, snapshots, bekreftelser og resultater |
+| `ui/tasks.py` | Én arbeidertråd, kø og tilbakelevering i GUI-tråden |
 | `ui/widgets.py` | Rullbart skjema, fokus og tabeller |
-| `tools/check_runtime.py` | Python/Tk-kontroll uten brukeroppsett |
-| `tools/run_tests.py` | Tester og versjonert Markdown-rapport |
-| `tests/` | Kjerne-, GUI- og repositorykontroller |
+| `tools/check_runtime.py` | Python/Tk/cryptography-kontroll |
+| `tools/run_tests.py` | Nettverkssperrede tester og versjonert Markdown-rapport |
+| `tests/` | Core-, API-kontrakt-, kryptografi-, feiltilfelle-, GUI- og repositorytester |
 
-Pakkestier i tabellen er relative til `svarut_svarinn_client/` med unntak av
-rotfiler, `tools/` og `tests/`. Oppsett og logger ligger ikke i denne strukturen.
+Pakkestier er relative til `svarut_svarinn_client/`, unntatt rotfiler,
+`tools/` og `tests/`. Produksjonskode bruker aldri testtransporten. Ekte
+legitimasjon, testorganisasjon eller mottakere skal ikke inn i kildefiler.

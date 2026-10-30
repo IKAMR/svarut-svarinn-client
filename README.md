@@ -1,20 +1,23 @@
 # SvarUt/SvarInn Client
 
-Selvstendig Python-klient under utvikling for sending og mottak av dokumenter
+Python-klient for sending av dokumenter og visning av innkommende forsendelser
 via de offisielle API-ene til KS SvarUt og SvarInn.
 
 ## Status
 
-Klienten har et grafisk brukergrensesnitt med lokal konfigurasjon, kontroll
-av oppsett og aktivitetslogg. Oppsettet lagres og gjenbrukes mellom oppstarter.
+Klienten har grafisk brukergrensesnitt, lokalt oppsett og aktivitetslogg.
+I KS sitt testmiljø kan den hente SvarInn-forsendelseslisten, autentisere mot
+Maskinporten, sende én PDF til en testorganisasjon og hente forsendelsesstatus.
+Utgående forsøk og forsendelses-ID-er lagres i en lokal journal.
 
-Tilkobling til KS, sending via SvarUt og mottak via SvarInn er ennå ikke
-implementert. Appen gjør ingen API-kall og er ikke klar for produksjonsbruk.
+API-koden er testet med simulerte svar; faktisk tilgang og levering må
+verifiseres mot testmiljøet. Dokumentnedlasting, dekryptering, mottakskvittering,
+AD-tilgang og flerbrukerdrift er ikke implementert. Produksjon er sperret.
 
 ## Oppstart på Windows
 
-Python 3.11 eller nyere med Tcl/Tk. Brukergrensesnittet bruker Tkinter/ttk;
-ingen tredjepartspakker er nødvendige.
+Python 3.11 eller nyere med Tcl/Tk. `install.bat` oppretter/gjenbruker `.venv`
+og installerer avhengighetene fra `requirements.txt`.
 
 ```bat
 install.bat
@@ -22,17 +25,17 @@ test.bat
 start.bat
 ```
 
-Se [testing](docs/TESTING.md) for testprosedyre og plattformstatus.
+Start med [oppsett og første API-test](docs/TEST-SETUP.md).
+Bruk bare ufølsomme testdata og testmottakere.
 
 ## Lokale data
 
-Appen oppretter og gjenbruker `setup.json` under
-`%LOCALAPPDATA%\SvarUtSvarInnClient` på Windows, utenfor repoet.
-Kontofeltene starter tomme og fylles inn lokalt.
+Oppsett, vindusvalg, aktivitetslogg og utgående journal lagres under
+`%LOCALAPPDATA%\SvarUtSvarInnClient`, utenfor repoet, og gjenbrukes ved omstart.
+Kontofelt fylles inn lokalt. Passord og token beholdes bare i minnet for
+økten; oppsettet lagrer filreferanser, ikke privat nøkkelinnhold.
 
-Passord og private nøkkelverdier lagres ikke av appen; nøkkelfeltene
-inneholder bare referanser til lokale filer. Lokalt oppsett, nøkler,
-dokumenter og logger skal ikke legges i Git.
+Oppsett, nøkler, mottakeropplysninger, dokumenter og logger skal ikke i Git.
 
 ## Dokumentasjon
 

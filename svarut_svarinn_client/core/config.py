@@ -17,6 +17,9 @@ class SvarUtSetup:
     integration_id: str = ""
     maskinporten_client_id: str = ""
     signing_key_file: str = ""
+    maskinporten_base_url: str = ""
+    maskinporten_key_id: str = ""
+    signing_certificate_file: str = ""
 
 
 @dataclass
@@ -29,7 +32,7 @@ class SvarInnSetup:
 
 @dataclass
 class Setup:
-    schema_version: int = 1
+    schema_version: int = 2
     environment: str = "TEST"
     svarut: SvarUtSetup = field(default_factory=SvarUtSetup)
     svarinn: SvarInnSetup = field(default_factory=SvarInnSetup)
@@ -41,11 +44,17 @@ class Setup:
     def from_dict(cls, value: dict[str, Any]) -> "Setup":
         if set(value) != {"schema_version", "environment", "svarut", "svarinn"}:
             raise StorageError("Ukjent oppsettstruktur. Originalen er ikke endret.")
-        if type(value["schema_version"]) is not int or value["schema_version"] != 1:
+        if type(value["schema_version"]) is not int or value["schema_version"] not in (1, 2):
             raise StorageError("Oppsettversjonen er ikke støttet. Originalen er ikke endret.")
         if value["environment"] != "TEST":
             raise StorageError("Denne versjonen tillater bare TEST. Produksjon er sperret.")
-        return cls(svarut=_group(SvarUtSetup, value["svarut"]),
+        su = value["svarut"]
+        if value["schema_version"] == 1:
+            old_names = {"api_base_url", "account_id", "integration_id", "maskinporten_client_id", "signing_key_file"}
+            if not isinstance(su, dict) or set(su) != old_names:
+                raise StorageError("Ukjente felt i eldre oppsett. Originalen er ikke endret.")
+            su = {**su, "maskinporten_base_url": "", "maskinporten_key_id": "", "signing_certificate_file": ""}
+        return cls(svarut=_group(SvarUtSetup, su),
                    svarinn=_group(SvarInnSetup, value["svarinn"]))
 
 

@@ -34,51 +34,66 @@ Kilder: [utviklersiden](https://developers.fiks.ks.no/tjenester/svarut/),
 [versjonstabellen](https://developers.fiks.ks.no/tjenester/svarut/api-versjoner/index.html),
 [tidlig avviklingsvarsel](https://ksdigital.no/2026/01/13/avvikling-av-soap-og-rest-v-1-api-for-svarut/).
 
-## Endepunkter som skal implementeres senere
 
-OpenAPI-spesifikasjonene oppgir testbasen:
+## Implementerte testoperasjoner
 
-```text
-https://test.svarut.ks.no/api
-```
+Testbase: `https://test.svarut.ks.no/api`.
 
-| Operasjon | Metode og sti under basen |
-| --- | --- |
-| Send til person | `POST /v3/kontoer/{kontoId}/forsendelser/person` |
-| Send til organisasjon | `POST /v3/kontoer/{kontoId}/forsendelser/organisasjon` |
-| Hent statuser | `POST /v3/kontoer/{kontoId}/forsendelser/status/sok` |
-| List nye SvarInn-forsendelser | `GET /svarinn/v2/forsendelser` |
-| Last ned forsendelsesfiler | `GET /svarinn/v2/forsendelser/{forsendelseId}` |
-| Oppdater mottaksstatus | `PATCH /svarinn/v2/forsendelser/{forsendelseId}/status` |
+| Operasjon | Metode og sti under basen | Status |
+| --- | --- | --- |
+| Send til organisasjon | `POST /v3/kontoer/{kontoId}/forsendelser/organisasjon` | Implementert for én PDF / kun digital levering |
+| Hent status | `POST /v3/kontoer/{kontoId}/forsendelser/status/sok` | Implementert for én ID per oppslag |
+| List SvarInn-forsendelser | `GET /svarinn/v2/forsendelser` | Implementert, inntil 200 metadataobjekter |
+| Send til person | `POST /v3/kontoer/{kontoId}/forsendelser/person` | Ikke implementert |
+| Last ned filer | `GET /svarinn/v2/forsendelser/{forsendelseId}` | Ikke implementert; transporten sperrer |
+| Kvitter mottak | `PATCH /svarinn/v2/forsendelser/{forsendelseId}/status` | Ikke implementert; transporten sperrer |
+
+Implementert betyr at kode og simulerte kontrakttester finnes. Faktisk
+konto-/tjenestetilgang og levering skal fortsatt verifiseres i KS-test.
+Forvaltningsportalene er ikke API-base; ikke legg `/api` til portaladressen.
+
+**Send:** multipart med JSON-delen `forsendelse` først, deretter dokumentet.
+Metadata bruker `mottaker.digitalId` (organisasjonsnummer), `mottaker.navn`,
+`tittel`, `dokumenter` med filnavn/MIME-type, `kunDigitalLevering: true` og
+`avgivendeSystem`. `eksternReferanse` og `korrelasjonsid` settes til en lokal
+UUID; valgfri `forsendelsestype` styrer ruting. Dokumentets multipart-filnavn
+skal stemme med metadata. HTTP 200 med `id` betyr akseptert, ikke levert.
+
+**Status:** JSON-body er `{"id":["<forsendelses-ID>"]}`. Svaret leses fra
+`statuser` med `id`, `status` og `sisteStatusEndring`. Nye ekstra felt ignoreres.
+
+**SvarInn:** Basic Auth med mottakersystemets service-legitimasjon. Tom liste
+er et gyldig, vellykket svar. Visningen leser `id`, `tittel`, `dato`, `filer`
+og `eksternRef`. Den følger ingen nedlastingslenke og kvitterer ingenting.
 
 Kilder: [Send V3](https://developers.fiks.ks.no/api/forsendelse-send-api-v3.json),
 [Status V3](https://developers.fiks.ks.no/api/forsendelse-status-api-v3.json),
 [SvarInn V2](https://developers.fiks.ks.no/api/svarinn-api-v2.json).
-Send bruker metadata og dokumenter som multipart; dokumentrekkefølge og
-filnavn må stemme. SvarInn-listen returnerer opptil 200 forsendelser.
-Nedlasting er kryptert; dokumentmetadata angir SHA-256.
 
-Forvaltningsportalene fra oppsettsveiledningen/e-posten er ikke API-base-URL-er.
-Ikke utled en ny API-base ved å legge `/api` til portaladressen.
-Endepunktene ovenfor er kartlagt, men **ingen av dem kalles i a1**.
+## Maskinporten og Fiks
 
-## Autentisering og åpne tekniske punkter
+SvarUt bruker `Authorization: Bearer <token>`, `IntegrasjonId` og
+`IntegrasjonPassord`. Scope er `ks:fiks`; integrasjonen må autoriseres til
+kontoen. Kilde: [Fiks-integrasjoner](https://developers.fiks.ks.no/felles/integrasjoner/).
 
-SvarUt krever Maskinporten-token og en autorisert Fiks-integrasjon med
-`IntegrasjonId` og `IntegrasjonPassord`. Scope er `ks:fiks`.
-Ny offentlig integrasjonsdokumentasjon beskriver både virksomhetssertifikat
-og egen asymmetrisk nøkkel for Maskinporten. Den private e-posten ba om
-virksomhetssertifikat. Velg og verifiser konkret oppsett før implementering;
-ikke bland portal-TestID med maskinidentitet.
-Kilde: [Fiks-integrasjoner](https://developers.fiks.ks.no/felles/integrasjoner/index.html).
+Token hentes med `POST https://test.maskinporten.no/token` og formfeltene
+`grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer` og `assertion`.
+Klienten signerer RS256 med privat RSA-nøkkel fra `cryptography`. Headeren
+bruker enten registrert `kid` eller matchende `x5c`-sertifikatkjede.
+JWT-claims: `aud=https://test.maskinporten.no/` (ikke token-URL), `iss` lik
+klient-ID, `scope=ks:fiks`, `iat`, `exp=iat+120` og ny `jti` per grant.
 
-SvarInn V2 er fortsatt dokumentert med Basic Auth/service-passord og eget
-krypteringsnøkkelpar. KS-eksemplet lager et offentlig PEM/X.509-sertifikat
-og privat RSA-nøkkel. Ikke anta at et vilkårlig rått PEM-public-key-format er
-uten videre utbyttbart med sertifikatet som portalen forventer.
-Kilde: [SvarInn REST](https://developers.fiks.ks.no/tjenester/svarut/svarinn-rest/index.html).
+Token behandles som en ugjennomsiktig verdi og caches bare i minnet, med
+utløp og kobling til oppsett/nøkkel. **Test Maskinporten** tvinger ny henting.
+Testknappen bekrefter ikke kontotilgang i Fiks. Første SvarUt-kall tester
+den og kan fortsatt avvises. Det er ingen automatisk gjentakelse av sending.
+Kilder: [JWT grant](https://docs.digdir.no/docs/Maskinporten/maskinporten_protocol_jwtgrant),
+[token-endepunkt](https://docs.digdir.no/docs/Maskinporten/maskinporten_protocol_token).
 
-Eksakt krypteringsinnpakning/algoritme og Python-dekryptering skal avklares
-mot referanseimplementasjon eller KS, og verifiseres med en ekte testforsendelse.
-Nøkkelstørrelse alene beskriver ikke filformatet. Ingen egen kryptoprotokoll
-eller antatt dekrypteringskode er lagt inn i a1.
+## Senere dokumentmottak
+
+SvarInn bruker eget mottaksnøkkelpar for krypterte filer. Listekallet trenger
+ikke privatnøkkelen. SHA-256 oppgis per dokument, men krypteringsinnpakning og
+Python-dekryptering skal verifiseres før de implementeres. Ikke anta at RSA-
+nøkkelstørrelsen alene beskriver filformatet. Kilde:
+[SvarInn REST](https://developers.fiks.ks.no/tjenester/svarut/svarinn-rest/index.html).

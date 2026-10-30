@@ -1,45 +1,53 @@
 # Testing
 
-## Automatisert test
+## Automatiserte tester
 
 Windows: `install.bat`, deretter `test.bat`. Testinngangen bruker lokal `.venv`
-og skriver `docs/test-results/v<versjon>.md`. Den starter ikke normal klient
-og leser ikke det virkelige brukeroppsettet. Det gjøres ingen KS-kall.
-
-For utvikling kan samme testinngang kjøres som:
+og skriver `docs/test-results/v<versjon>.md`. Den bruker midlertidige mapper,
+genererte testnøkler og simulerte API-svar, aldri brukerens oppsett. Utgående
+socket-tilkoblinger er eksplisitt sperret under testkjøringen.
 
 ```text
 python tools/run_tests.py
 ```
 
 På en Linux-testmaskin med Xvfb: `xvfb-run -a python tools/run_tests.py`.
-Dette verifiserer ikke Windows `.bat`, Windows-ACL, Windows-låsing eller
-praktisk DPI-/skjermoppførsel. GUI-tester uten display kan bli hoppet over på
-Linux; et slikt resultat markeres, ikke omtales som full GUI-test.
+Dette tester ikke Windows-batchfiler, Windows-ACL eller faktisk terminalserver.
+GUI-test uten skjerm kan bli hoppet over; det skal ikke omtales som bestått
+praktisk GUI-test. Miljø og bibliotekversjon står i rapporten.
 
-Testene dekker førstegangsoppsett, gjenbruk, korrupt JSON, konflikter, atomisk
-lagringsfeil, produksjonsmiljøsperre, testadresse-policy, faste logger,
-instanslås, CLI, GUI-lagring/lukking/fanebytte, rulling, dokumentlenker og
-.gitignore. Feil i tester skal rettes i riktig lag, ikke skjules ved å svekke
-implementasjonen eller slette relevant dekning.
+Dekningen omfatter eksisterende oppsett/lagring/lås/rulling, migrering fra
+skjema 1, RS256-signatur og JWT-claims, PEM/P12/JWK, token-cache, eksakt
+multipart og statuskontrakt, Basic Auth uten Maskinporten, TOM/utfylt SvarInn-
+liste, TLS/URL-/redirect-sperrer, begrensede/sanerte svar, sendejournal før
+POST, ukjent utfall, avvisning, duplikatsperre og gjenopptak ved omstart.
+GUI-testene kontrollerer arbeidertråd, sperring under kall, testbekreftelse,
+passord som ikke lagres, vedvarende ID og små vinduer.
 
-## Praktisk Windows-test av a1
+Det automatiserte resultatet dokumenterer kodekontrakter, **ikke** ekte
+KS-tilgang, kontoautorisasjon eller levering. Feil skal rettes i riktig lag,
+ikke skjules ved å svekke gyldige tester.
+
+## Praktisk Windows- og KS-test
 
 | Steg | Forventet resultat |
 | --- | --- |
-| Kjør install.bat og test.bat | Python/Tk godkjent; testresultatet leses, eventuelle hopp forklares |
-| Start med start.bat | Ett hovedvindu; riktig versjon og TEST; ingen ekte API-handlinger |
-| Velg Oppsett | Tomme felter første gang; lokal datamappe utenfor repoet synlig |
-| Registrer ufølsomme/syntetiske testverdier og lagre | Lagret status; faste logghendelser uten verdiene |
-| Lukk og start på nytt | Samme oppsett gjenbrukes |
-| Gjør ulagret endring, bytt fane, lukk med Avbryt | Endringen er fortsatt synlig |
-| Reduser vindu; test Tab og musehjul til siste felt | Hele skjemaet nås; Lagre/kontroll er tilgjengelig |
-| Kontroller lokalt | Mangler/ugyldig/registrert, aldri «KS-tilgang OK» |
-| Forsøk ny klient med samme datamappe | Ny instans avvises; første instans fortsetter |
-| Undersøk git status og staged diff | Ingen setup, nøkler, logger eller korrespondanse |
+| Kjør install.bat og test.bat | Python/Tk og kryptografibibliotek godkjent; rapport uten uforklarte hopp |
+| Start med start.bat | TEST synlig, eksisterende oppsett beholdt, ingen automatisk nettverkshandling |
+| Lagre eksisterende oppsett | Skjema oppgradert uten tap av kontoverdier; passord ikke i JSON |
+| Reduser vindu; bruk Tab, rulling og fanebytte | Oppsett/SvarUt nås fullt, tabeller ruller |
+| Gjør ulagret endring og forsøk API-kall | Lagring kreves før kallet; gammel konto brukes ikke i skjul |
+| Følg SvarInn-testen i TEST-SETUP | Faktisk tom/utfylt liste skilles fra avvist autentisering |
+| Test Maskinporten | Tokenhenting lykkes/feiler synlig, tokenet vises ikke |
+| Send ufølsom test-PDF til testorganisasjon | Returnert ID og lokal referanse vises og lagres |
+| Hent status og SvarInn-liste | Faktisk KS-status og eventuelt samme mottaks-ID |
+| Lukk/start klienten | Journal/oppsett beholdt, passord må fylles på nytt |
+| Test feilpassord og feil konto | Ingen falsk suksess, ingen råhemmeligheter i loggen |
+| Kontroller git status/staged diff | Ingen oppsett, nøkler, journal, logger eller dokumenter |
 
-Ikke bruk a1 til ekte dokumenter. Ugyldige kontoverdier kan lagres for å
-prøve skallet, men lokal kontroll vil markere formatfeil.
+Konkret feltoppsett: [TEST-SETUP.md](TEST-SETUP.md). Avbrudd under sending
+skal bare testes kontrollert med testdata; ukjent utfall må avstemmes før
+ny sending. AD, sonepolicy, dokumentnedlasting og kvittering er ikke aktivert.
 
 ## CLI og exit-koder
 
@@ -49,11 +57,12 @@ python run.py --check-setup
 python run.py --data-dir .local --check-setup
 ```
 
+CLI-kontrollen er fortsatt lokal, uten autentisering eller API-kall.
 0: normal avslutning/versjonsvisning. 1: oppstarts-/lagringsfeil.
-2: lokal kontroll viser mangler/ikke implementerte funksjoner (også argparse
-bruker 2 ved syntaksfeil). `--check-setup` kan ikke godkjenne a1 for API-bruk
-selv om alle felt er fylt ut.
+2: kontrollen finner mangler eller ikke implementerte kontrollpunkter
+(også argparse bruker 2 ved syntaksfeil). Et fylt oppsett er ikke et
+produksjons- eller tilgangsbevis.
 
-Del aldri brukerens setup.json, e-post eller privatnøkler som feilrapport.
-Den automatiske rapporten bruker bare syntetiske testdata og erstatter vanlige
-lokale stier, men gjennomlesning før deling/commit er fortsatt nødvendig.
+Rapporter under `test-results/` kan versjoneres etter gjennomlesning.
+Kontospesifikke praktiske resultater beholdes lokalt eller anonymiseres etter
+reglene i [manual-test-results/README.md](manual-test-results/README.md).

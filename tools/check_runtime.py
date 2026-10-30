@@ -16,6 +16,12 @@ def main() -> int:
     except Exception:
         print("Tcl/Tk could not start. Install Python with Tcl/Tk and use a desktop session.")
         return 1
+    try:
+        import cryptography
+    except ImportError:
+        print("cryptography is missing. Run install.bat again.")
+        return 1
+    print(f"cryptography {cryptography.__version__}: OK")
     print(f"Python {sys.version.split()[0]} and Tcl/Tk {version}: OK")
     return 0
 

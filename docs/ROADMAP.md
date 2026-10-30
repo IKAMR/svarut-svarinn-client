@@ -1,34 +1,33 @@
 # Planlagt funksjonalitet
 
-Dette dokumentet beskriver funksjoner som ikke er implementert i a1.
-Gjeldende funksjoner og begrensninger er oppsummert i [README](../README.md).
+Klienten har testkode for Maskinporten, SvarInn-liste, én PDF til
+organisasjon og status. Første praktiske verifikasjon er reelle kall mot KS-test
+med lokale kontotilganger. Beståtte simulerte tester er ikke et leveringsbevis.
+Se [TEST-SETUP.md](TEST-SETUP.md) og [README](../README.md).
 
-| Område | Planlagt innhold | Forventet resultat |
+| Område | Gjenstående innhold | Forventet resultat |
 | --- | --- | --- |
-| Terminalserver og brukertilgang | Personlig Windows-identitet, AD-sikkerhetsgrupper per sone/rolle, administratorstyrt oppsett og autorisasjon utenfor GUI | Gruppemedlemskap gir adgang; ikke et parallelt manuelt brukerregister |
-| Sonedeling | Samme kodebase med administrert sonepolicy; utgående i intranett, sending og mottak i sikret sone; separate data og tilganger | SvarInn skjules og sperres i intranett; manglende oppsett er ikke det samme som deaktivert funksjon |
-| Autentisering | Tjenesteeid hemmelighetslager, Maskinporten for SvarUt og service-tilgang for SvarInn | Verifisert tilgang i KS sitt testmiljø uten deling av hemmeligheter til GUI-brukere |
-| SvarUt | Sending til organisasjon og person via Send V3, flere dokumenter og Status V3 | Forsendelses-ID, varig lokal registrering og sporbar status |
-| SvarInn | Liste, nedlasting, dekryptering, SHA-256-kontroll og varig lokal lagring | Komplette dokumenter og metadata med kontrollert integritet |
-| Kvittering og gjenopptak | Kvittering etter verifisert lagring, avstemming, restart og håndtering av ukjent sendeutfall | Ingen tap eller dobbeltbehandling i avtalte feiltester |
-| Sikkerhet og drift | Tilgangsbeskyttelse, nøkkelbytte, backup/gjenoppretting og overvåking | Dokumentert sikker og gjenopprettbar databehandling |
+| Full SvarInn-rundtur | Nedlasting, dekryptering, SHA-256, varig mottakslagring og eksplisitt kvittering | Identiske dokumenter; kvittering først etter kontrollert lagring |
+| SvarUt-utvidelser | Personmottaker, flere dokumenter og nødvendige leveringsvalg | Verifisert funksjonsdekning utover én digital organisasjonssending |
+| Avstemming/gjenopptak | Kontrollert avklaring av ukjent sendeutfall og komplette mottakstransaksjoner | Ingen tap/dobbelbehandling i avtalte feiltester |
+| Terminalserver og tilgang | Verifisert Windows-identitet, AD-grupper, administrert oppsett og tjenesteautorisasjon | Gruppetilgang uten parallelt manuelt brukerregister |
+| Sonedeling | Samme kodebase med administrert sonepolicy, separate data/tilganger | SvarInn skjules og sperres i intranett; ikke bare tomt oppsett |
+| Hemmeligheter og drift | Tjenesteeid hemmelighetslager, nøkkelbytte, backup/gjenoppretting og overvåking | Forsvarlig flerbruker-/produksjonsdrift |
 
-Krav til verifikasjon beskrives i [GO-NOGO.md](GO-NOGO.md).
-Krypteringsformat og dekryptering skal verifiseres mot kompatible
-referanseimplementasjoner eller testdata, ikke utledes fra antakelser.
+AD og tjenestedrift er krav før flerbruker/produksjon, men ikke sperrer foran
+en avgrenset enkeltbrukertest med ufølsomme data i KS sitt testmiljø.
+Krypteringsformatet skal verifiseres mot referanseimplementasjon og faktiske
+testdata, ikke utledes av antakelser. Produksjonskrav: [GO-NOGO.md](GO-NOGO.md).
 
 ## Senere: adresseregister
 
-Et adresseregister skal vurderes etter grunnleggende brukertilgang, sending
-og mottak. Det bør være atskilt fra AD-basert brukertilgang, ha kontrollerte
-redigeringsrettigheter og kunne skille virksomheter og personer. Felles
-adresseregister betyr ikke automatisk deling mellom sonene. Faktiske
-mottakeropplysninger lagres utenfor repoet. Ingen registerfunksjon er
-implementert.
+Adresseregisteret skal være atskilt fra AD-tilgang, med kontrollerte
+redigeringsrettigheter og skille mellom virksomheter/personer. Det skal
+ikke deles automatisk mellom sonene. Faktiske mottakeropplysninger lagres
+utenfor repoet. Registeret er ikke implementert.
 
 ## Avgrensning
 
-Fiks melding, eksterne sak-/arkivintegrasjoner, automatisk overføring mellom
-soner, signering og NHN er ikke del av det planlagte grunnomfanget.
-Terminalserver og sonedeling er nye krav; komponentdelingen i ARCHITECTURE
-er foreslått, ikke implementert eller praktisk verifisert.
+Fiks melding, sak-/arkivintegrasjoner, automatisk overføring mellom soner,
+dokumentsignering og NHN inngår ikke i grunnomfanget. Valgt AD-prinsipp er
+dokumentert; konkret tjenestetransport og fysisk plassering er ikke låst.

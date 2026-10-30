@@ -23,6 +23,15 @@ ikke status for den lokale kontoen. Kontospesifikke verdier beholdes utenfor Git
 Se [KS-API.md](KS-API.md) for motstridende frister og forskjellen mellom
 portal og API. Dokumentasjonskontroll er ikke verifikasjon av kontotilgang.
 
+## Digdir og kryptografibibliotek
+
+| Kilde | Brukt til |
+| --- | --- |
+| [Maskinporten JWT grant](https://docs.digdir.no/docs/Maskinporten/maskinporten_protocol_jwtgrant) | RS256, kid/x5c, issuer/audience, scope, iat/exp/jti |
+| [Maskinporten token-endepunkt](https://docs.digdir.no/docs/Maskinporten/maskinporten_protocol_token) | Form-body og tokensvar |
+| [API-konsumentguide](https://docs.digdir.no/docs/Maskinporten/maskinporten_guide_apikonsument) | Registrering og nøkkelvalg |
+| [cryptography: serialisering](https://cryptography.io/en/latest/hazmat/primitives/asymmetric/serialization/) | PEM, RSA og PKCS#12 med bibliotekets nøkkelhåndtering |
+
 ## Privat underlag, ikke versjonert
 
 KS support sin e-post datert 14.09.2026 er lest fra brukerens vedlagte PDF.

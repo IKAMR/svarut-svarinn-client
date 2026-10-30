@@ -14,11 +14,12 @@ oppretter ikke Issues/branches og committer eller pusher ikke.
 6. Assistenten kontrollerer pushet commit, filendringer, versjon og dokumentasjon.
 7. Nytt increment lages først på brukerens instruksjon.
 
-ZIP-er er transport, ikke Git-historikk. Innen samme increment er eventuelle
-oppdaterte leveranser kumulative fra den avtalte baselinen etter den delte
-metoden, med mindre brukeren uttrykkelig ber om bare et fix-delta.
-Etter godkjent push er den commiten ny baseline. Ingen `.git`-mappe, runtime-data,
-private kilder eller nøkler skal med i leveransen.
+ZIP-er er transport, ikke Git-historikk. Lever bare nye og endrede filer
+med repository-relative stier. Første delta i et nytt increment er relativt
+til kontrollert, pushet baseline. Senere fix-delta inneholder bare endringer
+siden forrige leveranse, med mindre brukeren ber om en kumulativ pakke.
+Ingen `.git`-mappe, runtime-data, private kilder eller nøkler følger med.
+Etter godkjent push er den commiten ny baseline.
 
 ## Dokumentansvar og leserekkefølge
 
@@ -43,18 +44,20 @@ tjenester, lokal persistens, tydelig aktiv kontekst, responsiv layout,
 felles tester og dokumenterte grensesnitt. Ingen DWM-import, kopiert monolitt,
 profilmotor eller operasjons-/jobblistemodell bygges inn her.
 
-Den delte metodens leveranseregel gjelder her; DWM har prosjektspesifikke
-unntak som ikke automatisk overføres til dette repoet.
+Brukerens eksplisitte delta-instruksjon gjelder dette repoet. Andre DWM-
+spesifikke unntak overføres ikke automatisk.
 
 ## Teknisk minimum
 
-Python 3.11+, standardbibliotek og Tkinter/ttk i a1. Windows er målplattform,
+Python 3.11+, Tkinter/ttk og cryptography fra requirements.txt. Windows er målplattform,
 men supportpåstander krever faktisk lokal verifikasjon. Tester bruker
-midlertidige mapper og syntetiske verdier, aldri brukerens oppsett.
+midlertidige mapper, genererte nøkler og simulerte svar, aldri brukerens oppsett.
+Testinngangen sperrer utgående nettverk. Faktiske KS-tester krever brukerens
+lokale testoppsett og skal ikke blandes med automatisert evidens.
 Ikke legg domenelogikk i `.bat` eller lagring/API-kall i widget-callbacks.
 
 Versjonen eies av `svarut_svarinn_client/__init__.py`. ZIP-navn og rapport
-bruker samme utviklingsidentifikator, først `v0.1.0-a1`. Versjonsnotater samles
+bruker samme utviklingsidentifikator. Versjonsnotater samles
 i RELEASES; ikke opprett permanente designfiler per alpha.
 
 ## Avgrensning

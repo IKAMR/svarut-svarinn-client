@@ -7,6 +7,7 @@ import platform
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +18,9 @@ from svarut_svarinn_client import __version__
 def main() -> int:
     buffer = io.StringIO()
     suite = unittest.defaultTestLoader.discover(str(ROOT / "tests"))
-    result = unittest.TextTestRunner(stream=buffer, verbosity=2).run(suite)
+    with patch("socket.create_connection", side_effect=AssertionError("Network disabled in automated tests")), \
+         patch("socket.socket.connect", side_effect=AssertionError("Network disabled in automated tests")):
+        result = unittest.TextTestRunner(stream=buffer, verbosity=2).run(suite)
     text = buffer.getvalue()
     replacements = {str(ROOT): "<REPO>", str(Path.home()): "<HOME>", tempfile.gettempdir(): "<TEMP>"}
     for original, placeholder in sorted(replacements.items(), key=lambda item: -len(item[0])):
@@ -25,9 +28,10 @@ def main() -> int:
     print(text)
     status = "BESTATT" if result.wasSuccessful() and not result.skipped else "BESTATT MED HOPP" if result.wasSuccessful() else "FEILET"
     stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    import cryptography
     report = (f"# Testresultat v{__version__}\n\n"
               f"Tid (UTC): {stamp}\n\n"
-              f"Miljo: {platform.system()}, Python {platform.python_version()}\n\n"
+              f"Miljo: {platform.system()}, Python {platform.python_version()}, cryptography {cryptography.__version__}\n\n"
               f"Resultat: **{status}**. {result.testsRun} tester; "
               f"{len(result.failures)} feil, {len(result.errors)} unntak, {len(result.skipped)} hopp.\n\n"
               "Testene bruker bare syntetiske verdier og midlertidige mapper. "

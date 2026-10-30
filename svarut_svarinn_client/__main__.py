@@ -1,4 +1,4 @@
-"""Local GUI and offline setup inspection. This release performs no API calls."""
+"""GUI with explicit test API actions; CLI setup inspection remains offline."""
 from __future__ import annotations
 
 import argparse
@@ -11,7 +11,7 @@ from .core.storage import InstanceLock
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Selvstendig SvarUt/SvarInn-klient - lokalt TEST-skall")
+    parser = argparse.ArgumentParser(description="Selvstendig SvarUt/SvarInn-klient - KS-testklient")
     parser.add_argument("--version", action="version", version=f"v{__version__}")
     parser.add_argument("--data-dir", metavar="MAPPE", help="Lokal datamappe; standard er brukerens programdata")
     parser.add_argument("--check-setup", action="store_true", help="Kontroller lokalt oppsett uten GUI eller nettverk")

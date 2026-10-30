@@ -1,0 +1,2 @@
+# RSA signing and PEM/PKCS12 key loading. No third-party HTTP client.
+cryptography>=46.0.4,<51

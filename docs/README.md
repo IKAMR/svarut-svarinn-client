@@ -21,7 +21,7 @@ Kontoinformasjon og privat korrespondanse lagres lokalt, ikke i Git.
 | [ROADMAP.md](ROADMAP.md) | Planlagt funksjonalitet og avgrensninger |
 | [GO-NOGO.md](GO-NOGO.md) | Krav til funksjon, sikkerhet og drift før produksjonsbruk |
 | [TESTING.md](TESTING.md) | Automatiserte tester, praktisk test og CLI-kontroll |
-| [test-results/v0.1.0-a1.md](test-results/v0.1.0-a1.md) | Automatisert testresultat |
+| [test-results/v0.1.0-a2.md](test-results/v0.1.0-a2.md) | Automatisert testresultat for gjeldende kode |
 | [manual-test-results/README.md](manual-test-results/README.md) | Dokumentasjon av praktiske tester |
 | [RELEASES.md](RELEASES.md) | Funksjonsendringer og versjonsstatus |
 

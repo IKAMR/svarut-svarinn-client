@@ -1,51 +1,64 @@
 # Arkitektur
 
-## Implementert i a1
+## Implementert klient
 
 ```text
 run.py / python -m svarut_svarinn_client
-    |-- GUI (Tkinter/ttk)
-    |-- --check-setup (lokal kontroll)
+    |-- GUI (Tkinter/ttk) -> BackgroundTask -> TestOperations
+    |-- --check-setup (bare lokal kontroll)
           |
-          v
        AppService
           |-- ConfigStore -> lokal setup.json
           |-- inspect_setup -> lokale kontrollpunkter
-          |-- ActivityLog -> lokale, faste hendelseskoder
-          `-- KsGateway -> sperrede operasjoner, ingen nettverkskode
+          |-- ActivityLog -> faste hendelseskoder
+          `-- TestOperations
+                |-- MaskinportenClient -> RS256 JWT grant / token i minnet
+                |-- HttpsTransport -> testvert, TLS, ingen redirects/retry
+                `-- OutboxStore -> lokal SQLite-journal
 ```
 
-GUI-et viser og redigerer data. Kjernen eier oppsettskjema, lagring,
-validering og aktivitet. Ingen modul i core importerer GUI.
-CLI og GUI bruker samme AppService og oppsettkontroller.
+GUI-et viser/redigerer data; core eier validering, autentisering, API-kontrakter
+og lagring. Ingen core-modul importerer Tk. Nettverksarbeid kjøres i én
+arbeidertråd, og en trådsikker kø leverer resultat til GUI-tråden. Bare
+GUI-tråden leser/oppdaterer widgets. Oppsett og øktpassord kopieres før
+handlingen starter; lagring, ny API-handling og normal lukking sperres mens
+arbeidet pågår. Dette er en enkeltbruker-testklient, ikke Windows-tjenesten
+som er foreslått nedenfor.
 
-En prosesslås hindrer to klientinstanser med samme datamappe. Operativsystemet
-frigir låsen ved prosessavslutning. Oppsett skrives via midlertidig fil,
-flush/fsync og atomisk erstatning. Endring utenfor appen oppdages med en
-fingerprint og overskrives ikke bevisst. Dette er enkeltbrukerlagring,
-ikke en flerbruker-/nettverksdatabase.
+En OS-lås hindrer to appinstanser med samme datamappe. Oppsett skrives atomisk,
+og endringer utenfor appen oppdages. Skjema 1 leses uten å endre originalen;
+skjema 2 skrives ved eksplisitt lagring. SQLite-journalen er lokal, ikke en
+flerbruker-/nettverksdatabase. Se [CONFIGURATION.md](CONFIGURATION.md).
 
-Aktivitetsloggen er en enkel, lokal feilsøkingslogg. Den er **ikke** et
-manipulasjonssikret revisjonsarkiv eller en implementert forsendelsesjournal.
+## Utgående journal og ukjent utfall
 
-## Planlagt, ikke implementert
+En sendehandling validerer testdata og PDF, henter token og lagrer `SENDING`
+i journalen før dokumentet sendes. Journalen lagrer referanse, konto, mottaker,
+tittel, filnavn, SHA-256 og senere KS-ID/status, men ikke dokumentinnhold eller
+hemmeligheter. Ved HTTP 200 med gyldig ID lagres `ACCEPTED`; dette betyr
+akseptert av KS, ikke levert til mottaker.
 
-Autentisering, HTTP-transport, SvarUt og SvarInn skal fortsatt ligge utenfor
-GUI. Nettverksarbeid må kjøres utenfor GUI-tråden og rapportere tilbake
-via trådsikker kø; Tk-widgets oppdateres bare i GUI-tråden.
+Dokumentert avvisning i utvalgte 4xx-svar gir `REJECTED`. Tidsavbrudd, 5xx,
+uventet svar og andre uavklarte utfall gir `UNKNOWN`. Ved omstart går
+uferdige `SENDING`-rader til `UNKNOWN`. Ingen sending gjentas automatisk.
+Identiske, tidligere aksepterte eller uavklarte forsøk sperres lokalt med et
+fingeravtrykk av konto, metadata og dokumenthash. Dette er ikke en garanti
+for idempotens hos KS; automatisk avstemming er ikke implementert.
 
-Utgående sending trenger en varig transaksjonsjournal som skiller
-`klargjort`, `sender`, `utfall ukjent`, `akseptert` og etterfølgende KS-status.
-Ingen automatisk omsending etter tidsavbrudd uten avstemming.
+Journalfeil før POST stopper sendingen. Lagringsfeil etter KS-aksept viser
+returnert ID og lokal referanse uten å omsende. Feil i den separate, enkle
+aktivitetsloggen skal ikke omskrive et allerede lagret sendeutfall til feil.
+Verken journalen eller aktivitetsloggen er manipulasjonssikrede revisjonsarkiv.
 
-Inngående behandling trenger at nedlasting, dekryptering, hashkontroll,
-varig lokal lagring og kvittering er atskilte, gjenopptakbare trinn.
-Hentet er ikke kvittert. MOTTATT i mottaks-API-et er heller ikke det samme
-som journalført i et eksternt system.
+## Mottak og videre lagring
 
-Varig forsendelsesjournal og hemmelighetslager er ikke implementert.
-Krav til databehandling, feilhåndtering og drift er beskrevet i
-[GO-NOGO.md](GO-NOGO.md).
+SvarInn henter bare en metadata-liste og viser utvalgte felt i minnet.
+Nedlastingslenker følges ikke. Nedlasting, dekryptering, hashkontroll, varig
+mottakslagring og kvittering gjenstår som separate, gjenopptakbare trinn.
+Hentet liste er ikke dokumentmottak eller kvittert mottak.
+
+Produksjonskrav beskrives i [GO-NOGO.md](GO-NOGO.md). Enkeltbrukertest med
+øktpassord er ikke en implementasjon av flerbrukerarkitekturen nedenfor.
 
 ## Terminalserver og soner: krav og foreslått løsning
 

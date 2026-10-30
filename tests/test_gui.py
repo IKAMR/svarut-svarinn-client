@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import tempfile
+import time
+from threading import Event
+from uuid import uuid4
 import unittest
 from unittest.mock import patch
 
@@ -44,11 +47,33 @@ class GuiTests(unittest.TestCase):
         if hasattr(self, 'callbacks'):
             self.assertEqual(self.callbacks, [])
 
-    def test_expected_pages_and_disabled_network_actions(self):
+    def test_expected_pages_and_explicit_test_actions(self):
         self.assertEqual(list(self.app.pages), ['Oversikt', 'Oppsett', 'SvarUt', 'SvarInn', 'Aktivitetslogg'])
         self.assertIn('TEST', self.app.title())
         self.assertEqual(len(self.app.network_buttons), 4)
-        self.assertTrue(all(button.instate(['disabled']) for button in self.app.network_buttons))
+        self.assertTrue(all(not button.instate(['disabled']) for button in self.app.network_buttons))
+        self.assertFalse(self.app.api_ui.task.busy)
+        self.assertEqual(self.app.api_ui.incoming_rows, [])
+
+    def test_overview_describes_status_without_project_deadlines(self):
+        import tkinter as tk
+
+        texts = []
+        pending = [self.app.pages['Oversikt']]
+        while pending:
+            widget = pending.pop()
+            pending.extend(widget.winfo_children())
+            try:
+                texts.append(str(widget.cget('text')))
+            except tk.TclError:
+                pass
+        visible_text = '\n'.join(texts)
+        # Status copy must not reintroduce a dated rollout promise or a
+        # project-decision label. Do not lock tests to every sentence.
+        self.assertNotRegex(visible_text, r'\b\d{2}\.\d{2}\.\d{4}\b')
+        self.assertNotIn('go/nogo', visible_text.casefold())
+        self.assertNotIn('mål:', visible_text.casefold())
+        self.assertIn('Status', texts)
 
     def test_empty_first_start(self):
         self.assertFalse(self.app.is_dirty())
@@ -148,3 +173,139 @@ class GuiTests(unittest.TestCase):
         self.app.notebook.select(self.app.pages['Oversikt'])
         self.app.update()
         self.assertGreaterEqual(self.app.check_table.winfo_height(), 75)
+
+
+    def wait_for_api(self):
+        deadline = time.monotonic() + 3
+        while self.app.api_ui.task.busy and time.monotonic() < deadline:
+            self.app.update()
+            time.sleep(0.01)
+        self.app.update()
+        self.assertFalse(self.app.api_ui.task.busy, 'API worker did not finish')
+
+    def test_fill_test_addresses_changes_only_empty_public_addresses(self):
+        self.app.fields['svarut.account_id'].set('synthetic-account')
+        self.app.fill_test_addresses()
+        self.assertEqual(self.app.fields['svarut.account_id'].get(), 'synthetic-account')
+        self.assertEqual(self.app.fields['svarinn.api_base_url'].get(), 'https://test.svarut.ks.no/api')
+        self.assertTrue(self.app.is_dirty())
+        self.app.fields['svarut.api_base_url'].set('synthetic-existing-value')
+        self.app.fill_test_addresses()
+        self.assertEqual(self.app.fields['svarut.api_base_url'].get(), 'synthetic-existing-value')
+
+    def test_session_passwords_not_written_with_setup_or_window_state(self):
+        value='synthetic-session-password-must-not-be-saved'
+        for var in self.app.session_fields.values():
+            var.set(value)
+        self.app.fields['svarinn.service_username'].set('synthetic-user')
+        self.app.save_setup()
+        self.app.close()
+        for path in self.paths.root.rglob('*'):
+            if path.is_file():
+                self.assertNotIn(value.encode(),path.read_bytes())
+
+    def test_clear_session_empties_fields_and_token_cache(self):
+        for var in self.app.session_fields.values():
+            var.set('synthetic-secret')
+        with patch.object(self.service.gateway,'clear_secrets') as clear:
+            self.app.clear_session()
+            clear.assert_called_once()
+        self.assertTrue(all(not v.get() for v in self.app.session_fields.values()))
+
+    def test_incoming_empty_success_not_claimed_as_download(self):
+        with patch.object(self.service.gateway,'list_incoming',return_value=[]) as call:
+            self.app.api_ui.list_incoming()
+            self.wait_for_api()
+            call.assert_called_once()
+        self.assertIn('Tilkobling bekreftet',self.app.api_ui.receive_result.get())
+        self.assertIn('Ingen ventende',self.app.api_ui.receive_result.get())
+
+    def test_incoming_failure_clears_previous_rows_and_is_not_empty_success(self):
+        from svarut_svarinn_client.core.network import ApiError
+        self.app.api_ui.incoming.insert('','end',values=('synthetic-old-id','stale title','','',''))
+        with patch.object(self.service.gateway,'list_incoming',side_effect=ApiError('HTTP 401: synthetic')):
+            self.app.api_ui.list_incoming()
+            self.wait_for_api()
+        self.assertEqual(self.app.api_ui.incoming.get_children(),())
+        self.assertIn('401',self.app.api_ui.receive_result.get())
+        self.assertNotIn('Tilkobling bekreftet',self.app.api_ui.receive_result.get())
+
+    def test_incoming_list_renders_real_result_model(self):
+        identifier=str(uuid4())
+        rows=[{'id':identifier,'title':'Synthetic metadata','date':'Synthetic time','files':1,'reference':'Synthetic ref'}]
+        with patch.object(self.service.gateway,'list_incoming',return_value=rows):
+            self.app.api_ui.list_incoming()
+            self.wait_for_api()
+        values=self.app.api_ui.incoming.item(self.app.api_ui.incoming.get_children()[0])['values']
+        self.assertIn(identifier,str(values))
+        self.assertIn('1 forsendelser',self.app.api_ui.receive_result.get())
+
+    def test_unsaved_setup_prevents_api_call(self):
+        self.app.fields['svarinn.service_username'].set('synthetic-unsaved')
+        with patch.object(self.service.gateway,'list_incoming') as call, \
+             patch('svarut_svarinn_client.ui.api_views.messagebox.showinfo'):
+            self.app.api_ui.list_incoming()
+        call.assert_not_called()
+        self.assertFalse(self.app.api_ui.task.busy)
+
+    def test_busy_blocks_second_request_save_clear_and_close(self):
+        release=Event()
+        def work(*_):
+            release.wait(2)
+            return []
+        try:
+            with patch.object(self.service.gateway,'list_incoming',side_effect=work) as call:
+                self.app.api_ui.list_incoming()
+                self.app.update()
+                self.assertTrue(self.app.api_ui.task.busy)
+                self.assertTrue(all(button.instate(['disabled']) for button in self.app.network_buttons))
+                self.app.api_ui.list_incoming()
+                self.app.session_fields['svarinn_password'].set('synthetic-secret')
+                self.app.clear_session()
+                self.assertEqual(self.app.session_fields['svarinn_password'].get(),'synthetic-secret')
+                with patch('svarut_svarinn_client.ui.app.messagebox.showinfo'):
+                    self.assertFalse(self.app.save_setup())
+                    self.app.close()
+                self.assertTrue(self.app.winfo_exists())
+                release.set()
+                self.wait_for_api()
+                call.assert_called_once()
+        finally:
+            release.set()
+        self.assertTrue(all(not button.instate(['disabled']) for button in self.app.network_buttons))
+
+    def test_sending_requires_checkbox_and_final_confirmation(self):
+        with patch.object(self.service.gateway,'send') as call:
+            self.app.api_ui.send()
+            call.assert_not_called()
+            self.app.api_ui.confirmed.set(True)
+            with patch('svarut_svarinn_client.ui.api_views.messagebox.askyesno',return_value=False):
+                self.app.api_ui.send()
+            call.assert_not_called()
+
+    def test_send_success_populates_status_id_and_resets_confirmation(self):
+        identifier=str(uuid4())
+        self.app.api_ui.confirmed.set(True)
+        with patch.object(self.service.gateway,'send',return_value={'id':identifier,'reference':str(uuid4())}) as call, \
+             patch('svarut_svarinn_client.ui.api_views.messagebox.askyesno',return_value=True):
+            self.app.api_ui.send()
+            self.wait_for_api()
+            call.assert_called_once()
+        self.assertEqual(self.app.api_ui.values['remote_id'].get(),identifier)
+        self.assertFalse(self.app.api_ui.confirmed.get())
+        self.assertIn('ikke bekreftet levert',self.app.api_ui.send_result.get())
+
+    def test_small_window_exposes_end_of_send_form(self):
+        self.app.geometry('640x420')
+        self.app.notebook.select(self.app.pages['SvarUt'])
+        self.app.update()
+        form=self.app.api_ui.send_form
+        form.show_widget(self.app.api_ui.history)
+        self.app.update()
+        self.assertGreater(form.canvas.yview()[0],0)
+
+    def test_small_window_incoming_table_remains_usable(self):
+        self.app.geometry('640x420')
+        self.app.notebook.select(self.app.pages['SvarInn'])
+        self.app.update()
+        self.assertGreaterEqual(self.app.api_ui.incoming.winfo_height(),75)

@@ -2,56 +2,59 @@
 
 ## Implementert avgrensning
 
-Ingen HTTP-klient, Maskinporten-token, dokumenthenting eller kvittering i a1.
-KS-handlinger er sperret både i GUI og i tjenestelaget. Miljøet kan ikke
-byttes til produksjon gjennom oppsettet.
+Klienten er en enkeltbruker-testklient med bare eksplisitte brukerutløste kall.
+Transporten tillater kun dokumenterte HTTPS-testverter og de fire aktiverte
+operasjonene: Maskinporten-token, SvarInn-liste, organisasjonssending og status.
+Produksjon, vilkårlige URL-er, redirects, dokumentnedlasting og kvittering er
+sperret. TLS-verifikasjon kan ikke slås av. Ingen automatisk retry gjøres.
 
-Ingen mottaker-, konto-, TestID- eller integrasjonsverdier fra privat
-korrespondanse følger repoet. Standardoppsett er tomt og opprettes lokalt.
-Nøkkelfiler kopieres ikke inn. Passord lagres ikke i a1.
+Svar har størrelses- og tidsgrenser. Rå HTTP-headere, responsmeldinger og unntak
+vises/logges ikke; bare faste forklaringer, HTTP-status og tillatte feil-ID-er/
+feilkoder. Oversized eller uleselige svar gir feil, ikke antatt suksess.
 
-Aktivitetsloggen skriver bare tillatte hendelseskoder, tidspunkt, versjon og
-miljø. Detaljverdier, filstier og rå unntak lagres ikke. Den er ikke et
-ferdig revisjonsspor for produksjonsforsendelser.
+Kontoer, TestID, private korrespondanser og faktiske mottakerverdier finnes
+ikke i repoet. Passord og token finnes bare i appens minne under testøkten.
+Maskerte felt er ikke kryptert lagring, og Python-minne har ingen garanti for
+sikker nullstilling. Testklienten skal kjøres av en betrodd operatør i en
+beskyttet brukerprofil, bare med ufølsomme testdata. Den implementerer ikke
+AD-kontroll, flerbrukerisolasjon eller produksjonens tjenesteeide nøkkellager.
 
-## Lokal filbeskyttelse er ikke løst av .gitignore
+## Lokale data og journal
 
-`.gitignore` reduserer risiko for utilsiktet innsjekking, men beskytter ikke
-filtilgang og fjerner ikke materiale som allerede er i Git-historikken.
-Ikke bruk `git add -f` på runtime-data. Kontroller alltid staged diff før push.
-Oppsett er ukryptert metadata; beskytt datamappen med passende Windows-ACL.
-POSIX-filer opprettes restriktivt, men Windows-ACL er ikke satt eller
-verifisert automatisk. a1 er derfor ikke godkjent for reelle dokumenter.
+Oppsett lagrer bare nøkkelfilstier. Valgt privatnøkkel leses ved signering,
+men kopieres ikke. Journalen lagrer metadata, hash, lokal referanse og
+KS-ID/status, ikke PDF-innhold, passord eller token. Aktivitetsloggen lagrer
+bare faste hendelser, tid, versjon og miljø. Den er ikke et manipulasjonssikret
+revisjonsspor. Journalfeil stopper sending før POST; loggfeil må ikke skjule
+et journalført sendeutfall. Ukjent utfall omsendes ikke automatisk.
 
-Private nøkler, sertifikatpakker, service-passord, integrasjonspassord og
-Maskinporten-token skal ikke i repo, ZIP, skjermbilder eller delte testlogger.
-TestID og Tenor-kontoopplysninger fra prosjektet behandles også som lokale
-opplysninger selv om de er syntetiske.
+`.gitignore` hindrer ikke filtilgang og fjerner ikke tidligere publisert
+innhold. Ikke bruk `git add -f` på runtime-data. Beskytt profil/datamappe,
+nøkkelfiler og ukryptert metadatajournal med Windows-ACL. Disse rettighetene
+settes eller verifiseres ikke automatisk av klienten. POSIX-filer opprettes
+restriktivt; det erstatter ikke verifisert Windows-beskyttelse.
 
-## Krav før nettverk og produksjon
+Ingen private nøkler, servicepassord, integrasjonspassord, token, TestID eller
+lokale konto-/mottakerdata skal i repo, ZIP, delte skjermbilder eller rapporter.
+Ved utilsiktet publisering: trekk tilbake/roter berørte hemmeligheter og
+vurder historikken; sletting av siste filversjon alene er ikke tilstrekkelig.
 
-Før API-test: velg et egnet lokalt hemmelighetslager; implementer TLS-kontroll,
-kontrollert testvert, tokenhåndtering og skjerming av HTTP-headere/feil.
-Ikke send legitimasjon videre gjennom ukontrollerte redirects. Bekreft riktig
-krypteringsformat for SvarInn med referanseimplementasjon og faktisk testdata.
+## Krav før utvidet mottak og produksjon
 
-Før produksjon: verifiser tilgangsbegrensning, kryptert nøkkellagring,
-nøkkelbytte, backup/gjenoppretting, dataminimering, sikker oppgradering og
-tydelig rollefordeling. Dokumenter hvordan lokal mottakslagring inngår i
-virksomhetens videre rutiner, uten å forutsette en integrasjon i denne appen.
+Dekrypteringsformatet må verifiseres mot KS/referanseimplementasjon og en
+faktisk testforsendelse. Senere nedlasting trenger filstørrelsesgrenser,
+sikker filnavnhåndtering og vern mot ZIP path traversal/ZIP-bomber. Hashlikhet
+alene gjør ikke en fil trygg. Kvittering krever kontrollert varig lagring og
+gjenopprettbar tilstand.
 
-Nedlasting skal senere ha størrelsesgrenser, sikker filnavnhåndtering og vern
-mot ZIP path traversal/ZIP-bomber. En fil er ikke trygg bare fordi hash stemmer.
-Bekreftet mottak krever verifisert, varig lokal lagring og gjenopprettbar tilstand.
-
-Ved utilsiktet publisering av hemmeligheter: trekk tilbake/roter berørte
-hemmeligheter og vurder Git-historikken; sletting av siste filversjon alene
-avhjelper ikke eksponeringen. Ikke publiser hendelsesdetaljer i et åpent Issue.
+Før flerbruker- eller produksjonsbruk må tilgangsbegrensning, tjenesteeid
+hemmelighetslager, nøkkelbytte, backup/gjenoppretting, loggintegritet og
+sikker oppgradering implementeres/verifiseres. Se [GO-NOGO.md](GO-NOGO.md).
 
 ## Flerbruker og sonedeling: krav og anbefalt retning
 
 Dette avsnittet dokumenterer krav og en foreslått løsning, **ikke** sikkerhet
-som finnes i skallet. Dagens app har verken brukerregister, innlogging,
+som finnes i testklienten. Dagens app har verken brukerregister, innlogging,
 roller, sentral policy eller Windows-tjeneste.
 
 ### Identitet og rettigheter
@@ -91,7 +94,7 @@ Skjulte faner og deaktiverte knapper er ikke en sikkerhetsgrense. Tjenesten må
 håndheve autorisasjon også ved direkte kall utenom GUI-et. KS-passord, private
 nøkler og token skal ikke deles ut til GUI-prosessen eller brukernes profiler.
 Tjenesten må kjøre med egen, minst mulig privilegert identitet; konkret
-hemmelighetslager og Windows-ACL skal velges og verifiseres før nettverksbruk.
+hemmelighetslager og Windows-ACL skal velges og verifiseres før administrert flerbruker- eller produksjonsbruk.
 
 Vanlige brukere skal ikke kunne endre installert kode, felles oppsett,
 rollekoblinger eller revisjonslogg. Både servicefiler og dokumentlagring skal

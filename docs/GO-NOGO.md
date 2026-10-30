@@ -6,21 +6,21 @@ Kravene gjelder klientens sending, mottak, databehandling og feilhåndtering.
 De brukes til å vurdere om funksjonene er tilstrekkelig verifisert for
 produksjonsbruk. Dokumentet fastsetter ingen leverings- eller produksjonsdato.
 
-**a1 er et GUI-/oppsettskall, ikke en produksjonsklar klient.**
+**Klienten har avgrensede testoperasjoner, ikke produksjonsgodkjenning.**
 Fungerende portaltilgang, utfylte felt eller beståtte enhetstester er ikke
 verifikasjon av API-funksjonene.
 
 ## Funksjons- og kvalitetskrav
 
-| ID | Kriterium for Go | Nødvendig bevis | Status ved a1 |
+| ID | Kriterium for Go | Nødvendig bevis | Status |
 | --- | --- | --- | --- |
 | G01 | Brukerflyten fungerer på valgt Windows-klient og terminalserver, også med liten skjerm/høy DPI | Praktisk test av start, oppsett, sending, mottak og feilhåndtering | Brukeren har bekreftet test.bat og appstart; full brukerflyt og terminalserver gjenstår |
-| G02 | Begge autentiseringsløp fungerer med riktige kontorettigheter | Vellykkede kall og negative tester av token, passord og nøkkel | Ikke implementert |
-| G03 | Nødvendige mottakertyper og leveringskanaler er verifisert | Sending til testperson og testorganisasjon, hoveddokument/vedlegg, status og kontroll av faktisk levering | Ikke implementert |
-| G04 | SvarInn gir komplette, identiske og varig lagrede dokumenter/metadata | Ekte rundtur, dekryptering, SHA-256, store filer og flere forsendelser | Ikke implementert |
-| G05 | Ingen tap/dobbeltbehandling ved feil og restart | Avbrudd under sending, ukjent sendeutfall, nedlasting, lagring og kvittering; kontrollerte gjenopptak | Ikke implementert |
-| G06 | Hemmeligheter og dokumenter er forsvarlig beskyttet | ACL, hemmelighetslager, TLS, nøkkelbytte, skjermede logger, sikker fil-/ZIP-håndtering | Bare a1-avgrensning |
-| G07 | Aktivitet kan avstemmes og dokumenteres operativt | Varig forsendelsesjournal med referanser, status, feil og manuell oppfølging uten overflødig innhold | Enkel lokal skall-logg, ikke tilstrekkelig |
+| G02 | Begge autentiseringsløp fungerer med riktige kontorettigheter | Vellykkede kall og negative tester av token, passord og nøkkel | API-kode og simulerte tester finnes; faktiske kontokall gjenstår |
+| G03 | Nødvendige mottakertyper og leveringskanaler er verifisert | Sending til testperson og testorganisasjon, hoveddokument/vedlegg, status og kontroll av faktisk levering | Én PDF til testorganisasjon og status implementert; faktisk levering og øvrige mottakertyper gjenstår |
+| G04 | SvarInn gir komplette, identiske og varig lagrede dokumenter/metadata | Ekte rundtur, dekryptering, SHA-256, store filer og flere forsendelser | Bare metadata-liste implementert; komplette dokumenter/kvittering gjenstår |
+| G05 | Ingen tap/dobbeltbehandling ved feil og restart | Avbrudd under sending, ukjent sendeutfall, nedlasting, lagring og kvittering; kontrollerte gjenopptak | Lokal sendejournal, ukjent utfall og duplikatsperre testet med simulert transport; ekte avbrudd og mottaksflyt gjenstår |
+| G06 | Hemmeligheter og dokumenter er forsvarlig beskyttet | ACL, hemmelighetslager, TLS, nøkkelbytte, skjermede logger, sikker fil-/ZIP-håndtering | Testverts-/TLS-policy, øktpassord og sanerte feil finnes; Windows-ACL, varig hemmelighetslager og mottakssikkerhet gjenstår |
+| G07 | Aktivitet kan avstemmes og dokumenteres operativt | Varig forsendelsesjournal med referanser, status, feil og manuell oppfølging uten overflødig innhold | Lokal SQLite-sendejournal og faste logghendelser finnes; ikke manipulasjonssikret eller autorisert per bruker |
 | G08 | Drift og gjenoppretting er gjennomførbare | Eier, backup med gjenopprettingstest, overvåking, sertifikatvarsling og brukerstøtte | Ikke verifisert |
 | G09 | KS-forutsetninger og overgangen til produksjon er avklart | Produksjonstilgang, systemregistrering og eksplisitt godkjent, avgrenset produksjonsprøve | Avtalemulighet bekreftet privat; resten gjenstår |
 | G10 | Bare verifiserte Windows-brukere med riktig AD-gruppetilgang får tiltenkte rettigheter | Test to samtidige brukere, manglende eller feil sonegruppe, avgrensning av admin-/brukerrolle, direkte tjenestekall, innsyn i andres data og tilbakekalling i aktive sesjoner | Ikke implementert |

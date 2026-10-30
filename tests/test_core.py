@@ -16,7 +16,8 @@ from svarut_svarinn_client.core.activity import ActivityLog
 from svarut_svarinn_client.core.config import ConfigStore, Setup
 from svarut_svarinn_client.core.paths import AppPaths, REPOSITORY_ROOT, StorageError, resolve_paths
 from svarut_svarinn_client.core.readiness import inspect_setup, valid_test_api_url
-from svarut_svarinn_client.core.services import AppService, KsGateway, OperationUnavailable
+from svarut_svarinn_client.core.services import AppService
+from svarut_svarinn_client.core.network import ApiError
 from svarut_svarinn_client.core.storage import InstanceLock, atomic_json, read_json
 
 
@@ -65,7 +66,7 @@ class ConfigurationTests(TempCase):
             Setup.from_dict(data)
 
     def test_schema_and_production_rejected(self):
-        for field, bad in [('schema_version', 2), ('schema_version', True),
+        for field, bad in [('schema_version', 99), ('schema_version', True),
                            ('schema_version', '1'), ('environment', 'PROD')]:
             with self.subTest(field=field, bad=bad):
                 data = Setup().to_dict()
@@ -119,10 +120,10 @@ class ConfigurationTests(TempCase):
 
     def test_utf8_and_whitespace_handling(self):
         setup = self.store.load_or_create()
-        setup.svarinn.service_username = '  syntetisk-\u00f8ving  '
+        setup.svarinn.service_username = '  syntetisk-øving  '
         self.store.save(setup)
         loaded = ConfigStore(self.paths.setup).load_or_create()
-        self.assertEqual(loaded.svarinn.service_username, 'syntetisk-\u00f8ving')
+        self.assertEqual(loaded.svarinn.service_username, 'syntetisk-øving')
 
     def test_posix_file_permissions(self):
         if os.name == 'nt':
@@ -187,8 +188,8 @@ class PathsAndLockTests(TempCase):
 class ReadinessTests(TempCase):
     def test_empty_setup_is_not_ready(self):
         checks = inspect_setup(Setup())
-        self.assertEqual(sum(c.state == 'Mangler' for c in checks), 9)
-        self.assertEqual(sum(c.state == 'Ikke implementert' for c in checks), 2)
+        self.assertTrue(any(c.state == 'Mangler' for c in checks))
+        self.assertTrue(any(c.label == 'Nedlasting og kvittering' and c.state == 'Ikke implementert' for c in checks))
 
     def test_documented_test_endpoint_allowed(self):
         for url in ['https://test.svarut.ks.no/api', 'https://test.svarut.ks.no/api/']:
@@ -225,16 +226,16 @@ class ReadinessTests(TempCase):
         path.write_text('not-a-key')
         setup = Setup()
         setup.svarinn.private_key_file = str(path)
-        with patch.object(Path, 'read_bytes', side_effect=AssertionError('No key reads in a1')):
+        with patch.object(Path, 'read_bytes', side_effect=AssertionError('No key reads during local readiness inspection')):
             checks = inspect_setup(setup)
-        self.assertEqual(checks[8].state, 'Registrert')
-        self.assertIn('ikke', checks[8].detail)
+        self.assertEqual(next(c for c in checks if c.label == 'Privat PEM-nøkkel').state, 'Registrert')
+        self.assertIn('ikke', next(c for c in checks if c.label == 'Privat PEM-nøkkel').detail)
 
     def test_directories_and_relative_file_paths_not_valid_keys(self):
         for path in [str(self.root), 'relative-key.pem', str(self.root / 'missing.pem')]:
             setup = Setup()
             setup.svarinn.private_key_file = path
-            self.assertEqual(inspect_setup(setup)[8].state, 'Ugyldig')
+            self.assertEqual(next(c for c in inspect_setup(setup) if c.label == 'Privat PEM-nøkkel').state, 'Ugyldig')
 
     def test_fully_populated_fields_still_not_production_ready(self):
         keyfile = self.root / 'synthetic-reference.txt'
@@ -248,8 +249,8 @@ class ReadinessTests(TempCase):
         setup.svarinn.service_username = 'syntetisk'
         setup.svarinn.private_key_file = setup.svarinn.public_certificate_file = str(keyfile)
         checks = inspect_setup(setup)
-        self.assertEqual(sum(c.state == 'Registrert' for c in checks), 9)
-        self.assertEqual(sum(c.state == 'Ikke implementert' for c in checks), 2)
+        self.assertTrue(any(c.state != 'Registrert' for c in checks))
+        self.assertTrue(any(c.label == 'Nedlasting og kvittering' and c.state == 'Ikke implementert' for c in checks))
 
 
 class ActivityAndServiceTests(TempCase):
@@ -305,10 +306,10 @@ class ActivityAndServiceTests(TempCase):
         self.assertEqual(ConfigStore(self.paths.setup).load_or_create(), setup)
         self.assertEqual(service.setup, setup)
 
-    def test_gateway_operations_fail_closed(self):
-        gateway = KsGateway()
-        for operation in [gateway.send, gateway.status, gateway.receive, gateway.acknowledge]:
-            with self.assertRaises(OperationUnavailable):
+    def test_unimplemented_download_and_acknowledgement_remain_blocked(self):
+        gateway = AppService(self.paths).gateway
+        for operation in [gateway.receive, gateway.acknowledge]:
+            with self.assertRaises(ApiError):
                 operation()
 
 

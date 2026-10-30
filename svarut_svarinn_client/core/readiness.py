@@ -66,16 +66,25 @@ def _file(area: str, label: str, value: str) -> Check:
 
 def inspect_setup(setup: Setup) -> list[Check]:
     su, si = setup.svarut, setup.svarinn
+    from .network import test_base, ApiError
+    try:
+        test_base(su.maskinporten_base_url, maskinporten=True)
+        mp = Check("SvarUt", "Maskinporten testbase", "Registrert", "Testadresse gjenkjent; ingen tilkobling utført.")
+    except ApiError:
+        mp = Check("SvarUt", "Maskinporten testbase", "Mangler" if not su.maskinporten_base_url else "Ugyldig", "Bruk Fyll tomme testadresser i Oppsett.")
     return [
         _url("SvarUt", su.api_base_url),
         _identifier("SvarUt", "Konto-ID", su.account_id, uuid=True),
         _identifier("SvarUt", "Integrasjons-ID", su.integration_id, uuid=True),
         _identifier("SvarUt", "Maskinporten klient-ID", su.maskinporten_client_id),
+        mp,
         _file("SvarUt", "Signeringsnøkkel / sertifikatfil", su.signing_key_file),
-        Check("SvarUt", "Autentisering og sending", "Ikke implementert", "Maskinporten og hemmelighetshåndtering kommer i senere increment."),
+        Check("SvarUt", "kid / sertifikatkjede", "Kontroller ved API-test", "kid for registrert nøkkel, eller tilhørende sertifikatkjede (PEM/DER/P12/PFX)."),
+        Check("SvarUt", "Autentisering, sending og status", "Klar for test", "Bruk SvarUt-fanen. Lokal kontroll bekrefter ikke KS-tilgang."),
         _url("SvarInn", si.api_base_url),
         _identifier("SvarInn", "Service-brukernavn", si.service_username),
-        _file("SvarInn", "Privat PEM-nøkkel", si.private_key_file),
-        _file("SvarInn", "Offentlig PEM-sertifikat", si.public_certificate_file),
-        Check("SvarInn", "Mottak og kvittering", "Ikke implementert", "Service-passord, dekryptering og varig mottak er ikke testet."),
+        Check("SvarInn", "Forsendelsesliste", "Klar for test", "Fyll servicepassord i øktfeltet. Ingen mottaksnøkkel kreves for listen."),
+        _file("SvarInn", "Privat PEM-nøkkel", si.private_key_file) if si.private_key_file else Check("SvarInn", "Privat PEM-nøkkel", "Senere", "Ikke nødvendig for forsendelseslisten."),
+        _file("SvarInn", "Offentlig PEM-sertifikat", si.public_certificate_file) if si.public_certificate_file else Check("SvarInn", "Offentlig PEM-sertifikat", "Senere", "Ikke nødvendig for forsendelseslisten."),
+        Check("SvarInn", "Nedlasting og kvittering", "Ikke implementert", "Nøkkelreferansene beholdes for senere dokumentmottak. Ingen kvittering sendes."),
     ]

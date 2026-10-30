@@ -14,10 +14,12 @@ if errorlevel 1 goto missing_python
 python -m venv .venv
 if errorlevel 1 goto failed
 :verify
+".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -r requirements.txt
+if errorlevel 1 goto failed
 ".venv\Scripts\python.exe" tools\check_runtime.py
 if errorlevel 1 goto failed
 echo.
-echo Installasjon kontrollert. Ingen tredjepartspakker trengs i a1.
+echo Installasjon og avhengigheter kontrollert.
 echo Kjor test.bat, deretter start.bat.
 pause
 exit /b 0

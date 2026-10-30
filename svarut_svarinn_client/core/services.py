@@ -1,4 +1,4 @@
-"""Shared application layer. Real KS operations are deliberately unavailable."""
+"""Shared local application layer with explicit test-only KS operations."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,30 +7,7 @@ from .activity import ActivityLog
 from .config import ConfigStore, Setup
 from .paths import AppPaths, StorageError
 from .readiness import Check, inspect_setup
-
-
-class OperationUnavailable(RuntimeError):
-    pass
-
-
-class KsGateway:
-    """Fail closed even when called without a GUI. No HTTP client in a1."""
-
-    @staticmethod
-    def _blocked() -> None:
-        raise OperationUnavailable("API-operasjoner er ikke implementert i denne versjonen.")
-
-    def send(self) -> None:
-        self._blocked()
-
-    def status(self) -> None:
-        self._blocked()
-
-    def receive(self) -> None:
-        self._blocked()
-
-    def acknowledge(self) -> None:
-        self._blocked()
+from .ks_api import TestOperations
 
 
 @dataclass(frozen=True)
@@ -46,12 +23,14 @@ class AppService:
         self.store = ConfigStore(paths.setup)
         self.setup = self.store.load_or_create()
         self.activity = ActivityLog(paths.activity)
-        self.gateway = KsGateway()
+        self.gateway = TestOperations(paths, activity=self.activity)
 
     def save(self, candidate: Setup) -> SaveResult:
         cleaned = Setup.from_dict(candidate.to_dict())
         changed = self.store.save(cleaned)
         self.setup = cleaned
+        if changed:
+            self.gateway.clear_secrets()
         warning = ""
         if changed:
             try:

@@ -2,54 +2,60 @@
 
 ## Oppbygning
 
-Klienten bruker Tkinter/ttk og har ett hovedvindu. Oppsett, lokale kontroller
-og aktivitetslogg er implementert; SvarUt- og SvarInn-operasjonene er sperret
-i a1. GUI-et viser og redigerer data gjennom det felles tjenestelaget.
+Klienten bruker Tkinter/ttk, ett hovedvindu og fem faner. Ingen API-kall
+utføres automatisk ved oppstart, fanebytte eller lokal oppsettkontroll.
 
-Ett hovedvindu med fem faner:
-
-| Fane | Faktisk innhold i a1 |
+| Fane | Innhold |
 | --- | --- |
-| Oversikt | Lokale kontrollpunkter og eksplisitt ikke-produksjonsklar status |
-| Oppsett | Tomme kontofelt, lokale filreferanser, lagring og kontroll |
-| SvarUt | Planlagt flyt og sperrede knapper |
-| SvarInn | Planlagt flyt og sperrede knapper |
-| Aktivitetslogg | Faste, lokale hendelser uten kontoverdier |
+| Oversikt | Lokal oppsettkontroll, TEST og funksjonsbegrensninger |
+| Oppsett | Lokale konto-/nøkkelreferanser, lagring, offentlige testadresser og maskerte øktpassord |
+| SvarUt | Maskinporten-test, én PDF til testorganisasjon, statusoppslag og lokal utgående journal |
+| SvarInn | Hent metadata-liste; vis ID, tittel, dato, filantall og ekstern referanse |
+| Aktivitetslogg | Faste, lokale hendelser uten kontoverdier eller dokumentinnhold |
 
-Miljø og programversjon er synlige i hovedvinduet. `Registrert` betyr bare
-at et felt passerer den lokale kontrollen. Det betyr ikke at KS har godtatt
-identiteten, rettighetene eller nøkkelen.
+**Registrert** er bare lokal formatkontroll. **Maskinporten-token hentet**
+er ikke bekreftet Fiks-kontotilgang. **Akseptert av KS** er ikke levert.
+En autentisert tom SvarInn-liste er bekreftet tilkobling uten ventende
+forsendelser, ikke bevis på fungerende dokumentmottak. Etter mislykket
+listehenting vises ikke tidligere rader som om de var et nytt resultat.
 
-Oversiktens statusfelt beskriver faktisk funksjon og begrensninger, ikke
-prosjektfrister eller beslutningsløpet. Det viser at lokalt oppsett, kontroll
-og aktivitetslogg finnes, mens KS-tilkobling, sending og mottak ikke er
-implementert. Programversjonen beholdes i vinduets tekniske identifikasjon.
+Statusfelt beskriver faktisk funksjon, ikke prosjektfrister eller lovet
+produksjonsdato. Miljø og programversjon vises som teknisk kontekst.
 
 ## Vinduer og navigasjon
 
 Standardtekst er 11 punkt; overskrifter bruker samme størrelse med fet skrift.
-Vinduet kan endre størrelse og startstørrelsen begrenses til skjermen.
-Bare størrelse gjenbrukes, ikke en mulig utilgjengelig posisjon på en frakoblet skjerm.
+Vinduet kan endre størrelse og begrenses til skjermen. Bare størrelse gjenbrukes,
+ikke en mulig utilgjengelig posisjon på en frakoblet skjerm.
 
-Oppsett har egen vertikal rulling. Lagre/kontroll-knappene ligger utenfor
-rulleområdet. Musehjul behandles bare over relevant skjema, og Tab-fokus
-ruller feltet inn i synlig område. Tabeller har begge rulleretninger.
-Ingen fast bunnflate skal skyve siste inputfelt utenfor tilgjengelig skjerm.
+Oppsett og SvarUt har vertikal rulling. Lagre/kontroll ligger utenfor
+oppsettrullingen. Musehjul gjelder relevant skjema, Tab-fokus ruller feltet
+inn i synlig område, og tabeller har begge rulleretninger. SvarInn-tabellen
+beholder plass og rulling i et lite vindu.
 
-## Lagring og feilhåndtering
+## Handlinger og lagring
 
-Fanebytte bevarer ulagrede felt. Lagre eller Ctrl+S skriver oppsettet.
-Lukking med endringer gir Lagre / Forkast / Avbryt. Feilet lagring skal
-ikke fjerne ulagrede felt eller gi falsk bekreftelse. Lik verdi er ingen ny
-endring og produserer ikke en ny lagringshendelse.
+Fanebytte bevarer ulagrede oppsettfelt. Lagre eller Ctrl+S skriver oppsettet.
+Lukking med endringer gir Lagre / Forkast / Avbryt. Feilet lagring beholder
+feltene og gir ingen falsk bekreftelse. Uendret oppsett produserer ingen ny
+lagringshendelse. Passordfeltene inngår ikke i oppsettslagringen.
 
-Lokal kontroll lagrer ikke oppsettet og gjør ingen nettverkskall.
-En nettverksfeil skal senere kunne vises separat fra lokalt ugyldig oppsett.
-Ingen knapper skal simulere en vellykket sending eller mottakskvittering.
+API-handlinger krever lagret oppsett og kjøres i en arbeidertråd. Nytt kall,
+lagring, tømming av passord og normal lukking er sperret mens kallet pågår.
+Vindusflytting, fanebytte og rulling skal fortsatt fungere. Feil vises uten
+rå HTTP-respons, Authorization-header eller token.
+
+Sending krever bekreftelse på ufølsomme testdata og en egen sendebekreftelse.
+Ved retur vises faktisk KS-ID; ingen demonstrasjons-ID eller simulert suksess
+brukes i appen. Velg journalrad for å fylle statusfeltet. Ny bevisst test
+med samme dokument/mottaker må ha ny tittel; ukjent utfall skal avstemmes
+først, ikke omgås. SvarInn har ingen knapp for nedlasting eller kvittering.
+
+Se [TEST-SETUP.md](TEST-SETUP.md) for konkret testrekkefølge.
 
 ## Planlagt rolle- og sonetilpasning
 
-Dette er ikke implementert i dagens femfaners skall. Senere skal GUI-et vise
+Dette er ikke implementert i dagens testklient. Senere skal GUI-et vise
 bare funksjoner som både installasjonens sonepolicy og brukerens AD-baserte
 rettigheter tillater. Tjenesten skal håndheve samme begrensning utenom GUI-et.
 

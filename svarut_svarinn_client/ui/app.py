@@ -10,6 +10,8 @@ from ..core.config import Setup, SvarInnSetup, SvarUtSetup
 from ..core.paths import StorageError
 from ..core.services import AppService
 from ..core.storage import atomic_json, read_json
+from .api_views import ApiViews
+from ..core.network import TEST_API_BASE, TEST_MASKINPORTEN_BASE
 from .widgets import ScrollableForm, fit_columns, table
 
 TITLE = "SvarUt/SvarInn Client"
@@ -23,13 +25,15 @@ class App(tk.Tk):
         self.fields: dict[str, tk.StringVar] = {}
         self.entries: dict[str, ttk.Entry] = {}
         self.network_buttons: list[ttk.Button] = []
+        self.session_fields = {name: tk.StringVar(self) for name in
+            ("integration_password", "signing_key_password", "svarinn_password")}
         self._closing = False
         self.title(f"{TITLE} - v{__version__} - TEST")
         self._style()
         self._geometry()
         self.rowconfigure(1, weight=1)
         self.columnconfigure(0, weight=1)
-        self.status = tk.StringVar(value="TEST | Offline skall. Ingen sending, henting eller kvittering.")
+        self.status = tk.StringVar(value="TEST | Ingen automatisk sending eller kvittering.")
         self.dirty_status = tk.StringVar(value="Oppsett lagret lokalt")
         self._build()
         self._load_fields()
@@ -80,7 +84,7 @@ class App(tk.Tk):
         top.grid(row=0, column=0, sticky="ew")
         top.columnconfigure(0, weight=1)
         ttk.Label(top, text=f"{TITLE}  |  v{__version__}", style="Heading.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(top, text="TEST  |  API ikke aktivert").grid(row=0, column=1, sticky="e", padx=(12, 0))
+        ttk.Label(top, text="TEST  |  KS testmiljø").grid(row=0, column=1, sticky="e", padx=(12, 0))
         self.notebook = ttk.Notebook(self)
         self.notebook.grid(row=1, column=0, sticky="nsew", padx=12)
         self.pages: dict[str, ttk.Frame] = {}
@@ -90,8 +94,7 @@ class App(tk.Tk):
             self.notebook.add(page, text=label)
         self._overview()
         self._settings()
-        self._service_page("SvarUt")
-        self._service_page("SvarInn")
+        self.api_ui = ApiViews(self)
         self._activity()
         footer = ttk.Label(self, textvariable=self.status, padding=(16, 10), wraplength=900)
         footer.grid(row=2, column=0, sticky="ew")
@@ -104,8 +107,8 @@ class App(tk.Tk):
         info = ttk.Frame(page, padding=(16, 8))
         info.grid(row=0, column=0, sticky="ew")
         info.columnconfigure(0, weight=1)
-        ttk.Label(info, text="Mål: selvstendig klient fra 01.01.2027", style="Heading.TLabel").grid(row=0, column=0, sticky="w")
-        label = ttk.Label(info, text="Lokalt oppsett og logg. API-funksjoner er ikke implementert.\nIkke produksjonsklar. Endelig Go/NoGo er ikke avgjort.", justify="left", wraplength=850)
+        ttk.Label(info, text="Status", style="Heading.TLabel").grid(row=0, column=0, sticky="w")
+        label = ttk.Label(info, text="Testsending og status (SvarUt), forsendelsesliste (SvarInn).\nIngen dokumentnedlasting eller kvittering. Kun enkeltbrukertest.", justify="left", wraplength=850)
         label.grid(row=1, column=0, sticky="ew", pady=(5, 6))
         info.bind("<Configure>", lambda e: label.configure(wraplength=max(240, e.width-32)))
         actions = ttk.Frame(info)
@@ -130,16 +133,20 @@ class App(tk.Tk):
         self.form = ScrollableForm(page)
         self.form.grid(row=1, column=0, sticky="nsew")
         body = self.form.body
-        self.form.text(body, "Oppsettet opprettes automatisk og gjenbrukes neste gang. Alle kontofelt starter tomme. Passord og private nøkkelverdier skal ikke skrives inn her.").pack(fill="x", pady=(0, 8))
+        self.form.text(body, "Oppsettet opprettes automatisk og gjenbrukes neste gang. Alle kontofelt starter tomme. Passord fylles i egne maskerte øktfelt og lagres ikke. Private nøkkelverdier skal aldri limes inn.").pack(fill="x", pady=(0, 8))
         self.form.text(body, "Lokal oppsettfil: " + str(self.service.paths.setup)).pack(fill="x", pady=(0, 12))
-        self.form.text(body, "TEST er eneste tillatte miljø. API-adresser fylles inn fra docs/KS-API.md; portaladresser brukes ikke som API-base.").pack(fill="x", pady=(0, 12))
+        self.form.text(body, "TEST er eneste tillatte miljø. Bruk Fyll tomme testadresser for de offentlige API-adressene. Portaladresser brukes ikke som API-base.").pack(fill="x", pady=(0, 12))
+        ttk.Button(body, text="Fyll tomme testadresser", command=self.fill_test_addresses).pack(anchor="w", pady=(0, 12))
         groups = (
             ("SvarUt / Maskinporten", "svarut", (
                 ("api_base_url", "API-base-URL", False),
                 ("account_id", "SvarUt konto-ID", False),
                 ("integration_id", "Fiks integrasjons-ID", False),
                 ("maskinporten_client_id", "Maskinporten klient-ID", False),
-                ("signing_key_file", "Nøkkel-/sertifikatfil", True),
+                ("signing_key_file", "Privat nøkkel / P12 / PFX", True),
+                ("maskinporten_base_url", "Maskinporten testbase", False),
+                ("maskinporten_key_id", "Registrert kid (valgfri)", False),
+                ("signing_certificate_file", "PEM-/DER-sertifikatkjede", True),
             )),
             ("SvarInn", "svarinn", (
                 ("api_base_url", "API-base-URL", False),
@@ -164,29 +171,19 @@ class App(tk.Tk):
                 variable.trace_add("write", lambda *_args: self._dirty_changed())
                 if file_choice:
                     ttk.Button(box, text="Velg fil", command=lambda k=key: self.choose_file(k)).grid(row=row, column=2, padx=(8, 0))
-        self.form.text(body, "Her lagres bare referanser til nøkkel-/sertifikatfiler, ikke filinnhold. Filene kopieres ikke. Sikker lagring av service-passord og integrasjonspassord kommer før første API-test.").pack(fill="x", pady=(0, 12))
+        secrets = ttk.LabelFrame(body, text="Passord for denne økten - lagres ikke", padding=12)
+        secrets.pack(fill="x", pady=(0, 14))
+        secrets.columnconfigure(1, weight=1)
+        for row, (key, caption) in enumerate((("integration_password", "Fiks integrasjonspassord"),
+                ("signing_key_password", "Nøkkelpassord (om kryptert)"), ("svarinn_password", "SvarInn servicepassord"))):
+            ttk.Label(secrets, text=caption).grid(row=row, column=0, sticky="w", padx=(0, 12), pady=6)
+            entry = ttk.Entry(secrets, textvariable=self.session_fields[key], show="*")
+            entry.grid(row=row, column=1, sticky="ew", pady=6)
+            entry.bind("<FocusIn>", lambda _e, w=entry: self.form.show_widget(w))
+        self.clear_session_button = ttk.Button(secrets, text="Tøm passord og token", command=self.clear_session)
+        self.clear_session_button.grid(row=3, column=1, sticky="w", pady=8)
+        self.form.text(body, "Her lagres bare referanser til nøkkel-/sertifikatfiler, ikke filinnhold. Filene kopieres ikke. Passord og Maskinporten-token beholdes bare i minnet til appen lukkes eller økten tømmes. P12/PFX kan inneholde sertifikatkjeden. For PEM velges kid eller tilhørende sertifikatkjede.").pack(fill="x", pady=(0, 12))
         self.form.text(body, "Portalinlogging med TestID er ikke API-autentisering. Ikke legg TestID, kontoopplysninger, e-poster, nøkler eller logger i Git.").pack(fill="x")
-
-    def _service_page(self, name: str) -> None:
-        page = ScrollableForm(self.pages[name])
-        page.pack(fill="both", expand=True)
-        body = page.body
-        page.text(body, f"{name} - API-funksjoner kommer senere", style="Heading.TLabel").pack(fill="x", pady=(0, 12))
-        if name == "SvarUt":
-            text = "Planlagt: velg dokumenter og mottaker, kontroller forsendelsen, send via Send V3, lagre forsendelses-ID og følg status via Status V3. Ingen dokumenter eller mottakere registreres i a1."
-            buttons = ("Send forsendelse", "Hent status")
-        else:
-            text = "Planlagt: hent metadata via SvarInn V2, last ned, dekrypter, kontroller SHA-256 og lagre varig lokalt. Kvitter først etter kontrollert lagring og mulighet for gjenoppretting. Ingen forsendelser hentes eller kvitteres i a1."
-            buttons = ("Hent forsendelser", "Kvitter mottatt")
-        page.text(body, text).pack(fill="x", pady=(0, 20))
-        actions = ttk.Frame(body)
-        actions.pack(fill="x")
-        for label in buttons:
-            button = ttk.Button(actions, text=label, state="disabled")
-            button.pack(side="left", padx=(0, 8))
-            self.network_buttons.append(button)
-        page.text(body, "Knappene er sperret. Utfylte oppsettfelt betyr ikke at tilgangen er bekreftet.").pack(fill="x", pady=16)
-        ttk.Button(body, text="Gå til oppsett", command=lambda: self.notebook.select(self.pages["Oppsett"])).pack(anchor="w")
 
     def _activity(self) -> None:
         page = self.pages["Aktivitetslogg"]
@@ -221,7 +218,7 @@ class App(tk.Tk):
         return self.candidate().to_dict() != self.service.setup.to_dict()
 
     def _dirty_changed(self) -> None:
-        if len(self.fields) == 9:
+        if len(self.fields) == 12:
             self.dirty_status.set("Ulagrede endringer" if self.is_dirty() else "Oppsett lagret lokalt")
 
     def choose_file(self, key: str) -> None:
@@ -234,6 +231,9 @@ class App(tk.Tk):
         return "break"
 
     def save_setup(self) -> bool:
+        if hasattr(self, 'api_ui') and self.api_ui.task.busy:
+            messagebox.showinfo("API-kall pågår", "Lagre oppsett etter at API-kallet er avsluttet.", parent=self)
+            return False
         try:
             result = self.service.save(self.candidate())
         except StorageError as exc:
@@ -292,6 +292,9 @@ class App(tk.Tk):
     def close(self) -> None:
         if self._closing:
             return
+        if self.api_ui.task.busy:
+            messagebox.showinfo("API-kall pågår", "La API-kallet fullføre før du lukker klienten. Sending avbrytes ikke fra GUI.", parent=self)
+            return
         if self.is_dirty():
             answer = messagebox.askyesnocancel("Ulagrede endringer", "Lagre oppsettet før avslutning?", parent=self)
             if answer is None or (answer and not self.save_setup()):
@@ -302,5 +305,26 @@ class App(tk.Tk):
         except StorageError:
             if not messagebox.askyesno("Lokal lagring feilet", "Vinduinnstillinger eller avslutningslogg kunne ikke lagres. Avslutte likevel?", parent=self):
                 return
+        self.clear_session(log=False)
         self._closing = True
         self.destroy()
+
+    def fill_test_addresses(self) -> None:
+        for key, value in (("svarut.api_base_url", TEST_API_BASE), ("svarinn.api_base_url", TEST_API_BASE),
+                           ("svarut.maskinporten_base_url", TEST_MASKINPORTEN_BASE)):
+            if not self.fields[key].get().strip():
+                self.fields[key].set(value)
+
+    def clear_session(self, *, log: bool = True) -> None:
+        if hasattr(self, 'api_ui') and self.api_ui.task.busy:
+            return
+        for value in self.session_fields.values():
+            value.set("")
+        self.service.gateway.clear_secrets()
+        if log:
+            try:
+                self.service.activity.append("session_cleared")
+            except StorageError:
+                pass
+            self.status.set("Passord og tokenbuffer er tømt for denne økten.")
+            self.refresh_activity()
