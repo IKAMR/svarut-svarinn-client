@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import tkinter as tk
+import os
+from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from ..core.auth import SessionSecrets
 from ..core.config import Setup
 from ..core.ks_api import SendDraft
+from ..core.inbox import receipt_info, receipt_folder
 from ..core.network import ApiError
 from ..core.paths import StorageError
 from .tasks import BackgroundTask
@@ -32,6 +35,8 @@ class ApiViews:
         self._outgoing()
         self._incoming()
         self.refresh_history()
+        from .a4_settings import install
+        install(app)
 
     def _entry(self, form, box, row, key, label, *, browse=False):
         ttk.Label(box, text=label).grid(row=row, column=0, sticky='w', padx=(0, 8), pady=4)
@@ -107,7 +112,9 @@ class ApiViews:
         # Separate from the four a2 test-action buttons; still locked during any task.
         self.download_button = ttk.Button(actions, text='Last ned og kontroller valgt', command=self.download_selected)
         self.download_button.grid(row=0, column=1, padx=(0, 8), pady=4, sticky='w')
-        ttk.Button(actions, text='Gå til Oppsett', command=lambda: self.app.notebook.select(self.app.pages['Oppsett'])).grid(row=0, column=2)
+        self.recheck_button = ttk.Button(actions, text='Kontroller lagret mottak', command=self.recheck_selected)
+        self.recheck_button.grid(row=0, column=2, padx=(0, 8), pady=4, sticky='w')
+        ttk.Button(actions, text='Gå til Oppsett', command=lambda: self.app.notebook.select(self.app.pages['Oppsett'])).grid(row=0, column=3, padx=(0, 8), pady=4, sticky='w')
         state = ttk.Label(header, textvariable=self.receive_result, wraplength=850, justify='left')
         state.grid(row=3, column=0, sticky='ew', pady=(4, 0))
         header.bind('<Configure>', lambda e: [w.configure(wraplength=max(220, e.width-32)) for w in (explanation, state)])
@@ -129,7 +136,7 @@ class ApiViews:
         return setup, secrets
 
     def _busy_changed(self, busy):
-        for button in [*self.buttons, self.download_button]:
+        for button in [*self.buttons, self.download_button, self.recheck_button]:
             button.state(['disabled'] if busy else ['!disabled'])
         if hasattr(self.app, 'clear_session_button'):
             self.app.clear_session_button.state(['disabled'] if busy else ['!disabled'])
@@ -225,16 +232,85 @@ class ApiViews:
         if snapshot is None or self.task.busy:
             return
         selected = self.incoming_by_tree_id[selection[0]]
-        if not messagebox.askyesno('Last ned fra KS test?',
+        from ..core.inbox import receipt_info
+        root = (self.gateway.received_dir or self.gateway.outbox.path.parent / 'received')
+        info = receipt_info(root, selected['id'])
+        if info['exists']:
+            decision = self._existing_receipt_dialog(info)
+            if decision == 'open':
+                self._open_folder(info['path'])
+                return
+            if decision == 'verify':
+                self.recheck_selected()
+                return
+            if decision != 'download':
+                return
+        elif not messagebox.askyesno('Last ned fra KS test?',
                 'Last ned og dekrypter valgt forsendelse lokalt?\n\n' + selected['id'] +
                 '\n\nIngen mottakskvittering sendes.', parent=self.app):
             return
         def success(value):
             self.receive_result.set('Kontrollert mottak: ' + value['id'] +
                 '\nAntall SHA-256-kontrollerte filer: ' + str(value['files']) +
-                '\nLagringsmappe: ' + value['path'] + '\nIngen kvittering sendt til KS.')
+                ('\nADVARSEL: Storrelse avviker fra KS-metadata for ' + str(len(value.get('warnings', []))) + ' fil(er).' if value.get('warnings') else '') + '\nLagringsmappe: ' + value['path'] + '\nIngen kvittering sendt til KS.')
         self._run('Nedlasting og integritetskontroll',
-                  lambda: self.gateway.receive(*snapshot, selected['metadata']), success, self.receive_result)
+                  lambda: self.gateway.receive(*snapshot, selected['metadata'], allow_existing=info['exists']), success, self.receive_result)
+
+    def _open_folder(self, folder: str):
+        # Only paths derived from a validated UUID and configured receive root.
+        try:
+            if os.name == 'nt':
+                os.startfile(folder)
+            else:
+                self.receive_result.set('Mottaksmappe: ' + folder)
+        except OSError:
+            self.receive_result.set('Kunne ikke åpne mottaksmappen: ' + folder)
+
+    def _existing_receipt_dialog(self, info: dict) -> str:
+        """Explicit choice; no redownload on a mere confirmation."""
+        dialog = tk.Toplevel(self.app)
+        dialog.title('Forsendelsen finnes allerede lokalt')
+        dialog.transient(self.app)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        frame = ttk.Frame(dialog, padding=16)
+        frame.pack(fill='both', expand=True)
+        ttk.Label(frame, text='Forsendelsen finnes allerede lokalt', font=('TkDefaultFont', 11, 'bold')).pack(anchor='w')
+        ttk.Label(frame, text='Tidligere forsøk: ' + str(len(info['attempts'])) +
+                  (' (eldre a3-mottak finnes)' if info['legacy'] else '') +
+                  '\nSiste registrerte status: ' + info['status'] +
+                  '\nIngen eksisterende filer overskrives.', justify='left').pack(anchor='w', pady=8)
+        choice = tk.StringVar(dialog, value='open')
+        for label, value in (
+            ('Åpne eksisterende mottaksmappe', 'open'),
+            ('Kontroller eksisterende filer på nytt (uten nedlasting)', 'verify'),
+            ('Last ned på nytt til egen forsøksmappe', 'download'),
+            ('Avbryt', 'cancel')):
+            ttk.Radiobutton(frame, text=label, variable=choice, value=value).pack(anchor='w', pady=3)
+        result = ['cancel']
+        def finish():
+            result[0] = choice.get()
+            dialog.destroy()
+        ttk.Button(frame, text='Fortsett', command=finish).pack(side='left', pady=10)
+        ttk.Button(frame, text='Avbryt', command=dialog.destroy).pack(side='left', padx=10)
+        dialog.protocol('WM_DELETE_WINDOW', dialog.destroy)
+        dialog.wait_window()
+        return result[0]
+
+    def recheck_selected(self):
+        selection = self.incoming.selection()
+        if len(selection) != 1 or selection[0] not in self.incoming_by_tree_id:
+            self.receive_result.set('Velg én forsendelse i listen først.')
+            return
+        if self.task.busy:
+            return
+        shipment = self.incoming_by_tree_id[selection[0]]['id']
+        def success(result):
+            text = 'Lokal SHA-256-kontroll bestått: ' + str(result['files']) + ' fil(er).'
+            if result.get('warnings'):
+                text += ' ADVARSEL: Avvik i KS-filstørrelse for ' + str(len(result['warnings'])) + ' fil(er).'
+            self.receive_result.set(text + '\n' + result['path'] + '\nIngen mottakskvittering sendt.')
+        self._run('Lokal etterkontroll', lambda: self.gateway.recheck(shipment), success, self.receive_result)
 
     def refresh_history(self):
         try:

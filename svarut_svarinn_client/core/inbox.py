@@ -124,8 +124,58 @@ def _download(transport, url: str, authorization: str) -> bytes:
         raise ApiError('SvarInn-nedlasting feilet. Ingen raa respons eller legitimasjon logget.') from None
 
 
+def receipt_info(root: Path, shipment: str) -> dict:
+    """Read-only inventory. Existing and legacy data are never repaired implicitly."""
+    shipment = uuid_text(shipment, 'Forsendelses-ID')
+    folder = root / shipment
+    if not folder.exists():
+        return {'exists': False, 'path': str(folder), 'attempts': [], 'legacy': False, 'status': 'NEW'}
+    if not folder.is_dir() or folder.is_symlink():
+        return {'exists': True, 'path': str(folder), 'attempts': [], 'legacy': False, 'status': 'UNKNOWN'}
+    legacy = any((folder / x).exists() for x in ('metadata.json', 'forsendelse.cms', 'verification.json', 'forsendelse.zip'))
+    attempts = []
+    unknown = []
+    for child in sorted(folder.iterdir()):
+        if child.name in ('metadata.json','forsendelse.cms','verification.json','forsendelse.zip','forsendelse.pdf','forsendelse.decrypted.bin','documents'):
+            continue
+        if child.name.startswith('attempt-') and len(child.name) == 11 and child.name[8:].isdigit() and child.is_dir() and not child.is_symlink():
+            attempts.append({'name': child.name, 'path': str(child), 'status': _receipt_status(child)})
+        else:
+            unknown.append(child.name)
+    status = 'UNKNOWN' if unknown or (not legacy and not attempts) else (
+        attempts[-1]['status'] if attempts else _receipt_status(folder))
+    return {'exists': True, 'path': str(folder), 'attempts': attempts, 'legacy': legacy,
+            'status': status, 'unknown': bool(unknown)}
+
+
+def _receipt_status(folder: Path) -> str:
+    try:
+        data = json.loads((folder / 'verification.json').read_text(encoding='utf-8'))
+        status = data.get('status')
+        return status if status in ('VERIFIED','VERIFIED_WITH_WARNINGS','INSPECTION_REQUIRED','DOWNLOADED') else 'UNKNOWN'
+    except (OSError, ValueError, TypeError):
+        return 'UNKNOWN'
+
+
+def receipt_folder(root: Path, shipment: str, name: str | None = None) -> Path:
+    """Resolve a selected attempt or legacy receipt without accepting arbitrary paths."""
+    shipment = uuid_text(shipment, 'Forsendelses-ID')
+    target = root / shipment
+    if name is None:
+        info = receipt_info(root, shipment)
+        if info['attempts']:
+            return Path(info['attempts'][-1]['path'])
+        if (target / 'metadata.json').is_file():
+            return target
+        raise ApiError('Ingen lagret mottakskontroll er tilgjengelig.')
+    if not (name.startswith('attempt-') and len(name)==11 and name[8:].isdigit()):
+        raise ApiError('Ugyldig forsøks-ID.')
+    return target / name
+
+
 def receive_delivery(transport, *, base_url: str, authorization: str, metadata: dict,
-                     private_key_file: str, public_certificate_file: str, data_root: Path) -> dict:
+                     private_key_file: str, public_certificate_file: str, data_root: Path,
+                     received_dir: Path | None = None, allow_existing: bool = False) -> dict:
     """No acknowledgement request is ever sent. Metadata comes from fresh KS list."""
     shipment = uuid_text(metadata.get('id'), 'Forsendelses-ID')
     expected_files = metadata.get('filer')
@@ -144,32 +194,53 @@ def receive_delivery(transport, *, base_url: str, authorization: str, metadata: 
             raise ApiError('Ugyldig filstorrelse fra KS.')
         expected[name] = (digest.lower(), size)
     base = test_base(base_url)
-    root = data_root / 'received'
-    target = root / shipment
-    if target.exists():
-        raise ApiError('Denne forsendelsen finnes allerede lokalt. Ingen overskriving; kontroller mottaksmappen.')
-    root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    # A successful HTTP download is evidence and must survive later failures.
-    # Create a private staging directory; publish the raw delivery atomically
-    # before any CMS processing. No automatic retries or overwrites.
-    stage = Path(tempfile.mkdtemp(prefix='.incoming-', dir=root))
-    published = False
+    root = received_dir if received_dir is not None else data_root / 'received'
+    parent = root / shipment
+    info = receipt_info(root, shipment)
+    if info['exists'] and not allow_existing:
+        raise ApiError('Forsendelsen finnes allerede lokalt. Velg en handling i dialogen.')
+    if info.get('status') == 'UNKNOWN' and info['exists'] and not info['attempts'] and not info['legacy']:
+        raise ApiError('Ukjent innhold i mottaksmappen. Undersøk mappen før nytt forsøk.')
+    # Atomic creation: another writer cannot reserve the same attempt number.
+    # Legacy a3 files remain untouched directly under the UUID folder.
     try:
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        parent.mkdir(mode=0o700, exist_ok=True)
+        if parent.is_symlink():
+            raise ApiError('Mottaksmappen kan ikke være en symbolsk lenke.')
+        target = None
+        for n in range(1, 10000):
+            candidate = parent / f'attempt-{n:03d}'
+            try:
+                candidate.mkdir(mode=0o700, exist_ok=False)
+                target = candidate
+                break
+            except FileExistsError:
+                continue
+        if target is None:
+            raise ApiError('Maksimalt antall nedlastingsforsøk er nådd.')
+    except OSError:
+        raise ApiError('Kan ikke opprette egen forsøksmappe; eksisterende filer er beholdt.') from None
+    try:
+        _write_verification(target, shipment, 'DOWNLOADING', [], 'Nedlasting startet; ingen kvittering sendt.')
         encrypted = _download(transport, base + '/svarinn/v2/forsendelser/' + shipment, authorization)
         if not encrypted or len(encrypted) > MAX_DELIVERY:
             raise ApiError('Tom eller for stor kryptert levering.')
-        (stage / 'forsendelse.cms').write_bytes(encrypted)
-        (stage / 'metadata.json').write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding='utf-8')
-        _write_verification(stage, shipment, 'DOWNLOADED', [], 'Pakken er lagret; behandling ikke fullfort.')
-        stage.rename(target)
-        published = True
-    except (OSError, ValueError):
-        raise ApiError('Kunne ikke lagre nedlastet leveranse. Ingen mottakskvittering sendt.') from None
-    finally:
-        if not published:
-            shutil.rmtree(stage, ignore_errors=True)
+        (target / 'forsendelse.cms').write_bytes(encrypted)
+        (target / 'metadata.json').write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding='utf-8')
+        _write_verification(target, shipment, 'DOWNLOADED', [], 'Pakken er lagret; behandling ikke fullfort.')
+    except Exception as exc:
+        # Preserve attempt evidence and mark failure, never touch an older attempt.
+        try:
+            _write_verification(target, shipment, 'INSPECTION_REQUIRED', [], 'Nedlasting eller lokal lagring feilet.')
+        except OSError:
+            pass
+        if isinstance(exc, ApiError):
+            raise
+        raise ApiError('Nedlasting/lagring feilet. Ingen kvittering sendt.') from None
 
     verified = []
+    warnings = []
     try:
         plain = _decrypt(encrypted, Path(private_key_file), Path(public_certificate_file), target)
         plain_path = target / 'forsendelse.zip'  # Name is provisional until format is identified.
@@ -178,12 +249,14 @@ def receive_delivery(transport, *, base_url: str, authorization: str, metadata: 
             if len(expected) != 1:
                 raise ApiError('Dekryptert PDF, men KS oppgir flere filer. Originalen beholdes.')
             name, (digest, size) = next(iter(expected.items()))
-            if len(plain) != size or hashlib.sha256(plain).hexdigest() != digest:
-                raise ApiError('Dekryptert PDF samsvarer ikke med KS sin SHA-256 eller filstorrelse.')
+            if hashlib.sha256(plain).hexdigest() != digest:
+                raise ApiError('SHA-256 stemmer ikke med KS-metadata.')
+            if len(plain) != size:
+                warnings.append({'filnavn': name, 'forventet': size, 'faktisk': len(plain), 'avvik': len(plain) - size})
             docs = target / 'documents'
             docs.mkdir(mode=0o700)
             (docs / name).write_bytes(plain)
-            verified.append({'filnavn': name, 'sha256': digest, 'bytes': size, 'status': 'VERIFIED'})
+            verified.append({'filnavn': name, 'sha256': digest, 'bytes': len(plain), 'status': 'HASH_OK', 'expectedBytes': size})
         elif zipfile.is_zipfile(io.BytesIO(plain)):
             docs = target / 'documents'
             docs.mkdir(mode=0o700)
@@ -200,19 +273,22 @@ def receive_delivery(transport, *, base_url: str, authorization: str, metadata: 
                     seen.add(name)
                     digest, size = expected[name]
                     total_unpacked += member.file_size
-                    if total_unpacked > MAX_DELIVERY or member.file_size != size or member.file_size > MAX_DELIVERY:
+                    if total_unpacked > MAX_DELIVERY or member.file_size > MAX_DELIVERY:
                         raise ApiError('Filstorrelse avviker fra KS-metadata.')
                     with archive.open(member) as stream:
-                        data = stream.read(size + 1)
-                    if len(data) != size or hashlib.sha256(data).hexdigest() != digest:
-                        raise ApiError('SHA-256 eller filstorrelse stemmer ikke med KS-metadata.')
+                        data = stream.read(member.file_size + 1)
+                    if len(data) != member.file_size or hashlib.sha256(data).hexdigest() != digest:
+                        raise ApiError('SHA-256 stemmer ikke med KS-metadata.')
+                    if len(data) != size:
+                        warnings.append({'filnavn': name, 'forventet': size, 'faktisk': len(data), 'avvik': len(data) - size})
                     (docs / name).write_bytes(data)
-                    verified.append({'filnavn': name, 'sha256': digest, 'bytes': size, 'status': 'VERIFIED'})
+                    verified.append({'filnavn': name, 'sha256': digest, 'bytes': len(data), 'status': 'HASH_OK', 'expectedBytes': size})
         else:
             plain_path.rename(target / 'forsendelse.decrypted.bin')
             raise ApiError('Dekryptert innhold er verken ZIP eller PDF. Pakken er beholdt for inspeksjon.')
-        _write_verification(target, shipment, 'VERIFIED', verified)
-        return {'id': shipment, 'path': str(target), 'files': len(verified)}
+        _write_verification(target, shipment, 'VERIFIED_WITH_WARNINGS' if warnings else 'VERIFIED', verified,
+                            'SHA-256 stemmer; KS-storrelse avviker.' if warnings else '', warnings=warnings)
+        return {'id': shipment, 'path': str(target), 'files': len(verified), 'warnings': warnings}
     except (ApiError, zipfile.BadZipFile, RuntimeError, OSError, ValueError) as exc:
         # On error, keep encrypted CMS and any decrypted container, but never
         # publish a partly verified documents directory as a valid receipt.
@@ -222,14 +298,95 @@ def receive_delivery(transport, *, base_url: str, authorization: str, metadata: 
             _write_verification(target, shipment, 'INSPECTION_REQUIRED', [], message)
         except OSError:
             raise ApiError('Nedlastet pakke er lagret, men kontrollrapporten kunne ikke oppdateres. Sjekk mottaksmappen.') from None
-        raise ApiError(message + ' Originalpakken er lagret lokalt under received/' + shipment + '. Ingen kvittering sendt.') from None
+        raise ApiError(message + ' Originalpakken er beholdt i ' + str(target) + '. Ingen kvittering sendt.') from None
 
 
-def _write_verification(folder: Path, shipment: str, status: str, files: list, note: str = '') -> None:
+def _write_verification(folder: Path, shipment: str, status: str, files: list, note: str = '',
+                        warnings: list | None = None) -> None:
     """Only app-owned diagnostics; no server error bodies or credential content."""
     report = {'forsendelseId': shipment, 'status': status, 'acknowledged': False,
               'updatedUtc': datetime.now(timezone.utc).isoformat(timespec='seconds'),
-              'files': files, 'note': note}
+              'files': files, 'warnings': warnings or [], 'note': note}
     temporary = folder / 'verification.json.tmp'
     temporary.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding='utf-8')
     temporary.replace(folder / 'verification.json')
+
+
+def recheck_saved_receipt(folder: Path, *, expected_id: str) -> dict:
+    """Offline integrity recheck of a previously saved a3 CMS/ZIP receipt.
+
+    No HTTP, decryption, or acknowledgement. Never changes original CMS/ZIP.
+    """
+    shipment = uuid_text(expected_id, 'Forsendelses-ID')
+    if (folder.name != shipment and not (folder.name.startswith('attempt-') and folder.parent.name == shipment)) or not folder.is_dir() or folder.is_symlink():
+        raise ApiError('Lokal mottaksmappe finnes ikke.')
+    try:
+        metadata = json.loads((folder / 'metadata.json').read_text(encoding='utf-8'))
+        if uuid_text(metadata.get('id'), 'Forsendelses-ID') != shipment:
+            raise ApiError('Metadata har en annen forsendelses-ID.')
+        fields = metadata.get('filer')
+        if not isinstance(fields, list) or not fields or len(fields) > MAX_FILES:
+            raise ApiError('Ugyldig filliste i lagrede metadata.')
+        expected = {}
+        for field in fields:
+            name = _safe_name(field.get('filnavn'))
+            sha = field.get('hash')
+            size = field.get('storrelse')
+            if (name in expected or not isinstance(sha, str) or len(sha) != 64 or
+                any(c not in '0123456789abcdefABCDEF' for c in sha) or
+                type(size) is not int or size < 0 or size > MAX_DELIVERY):
+                raise ApiError('Ugyldig filmetadata for lokal kontroll.')
+            expected[name] = (sha.lower(), size)
+        zip_path = folder / 'forsendelse.zip'
+        if not zip_path.is_file() or zip_path.stat().st_size > MAX_DELIVERY:
+            raise ApiError('Lagret dekryptert ZIP mangler. Original CMS beholdes.')
+        actual = []
+        warnings = []
+        buffer = {}
+        with zipfile.ZipFile(zip_path) as archive:
+            members = archive.infolist()
+            if len(members) != len(expected):
+                raise ApiError('Antall ZIP-dokumenter avviker fra metadata.')
+            total = 0
+            for member in members:
+                name = _safe_name(member.filename)
+                if name not in expected or name in buffer or member.is_dir() or member.flag_bits & 1:
+                    raise ApiError('Uventet ZIP-oppforing.')
+                total += member.file_size
+                if total > MAX_DELIVERY:
+                    raise ApiError('Mottaket overstiger maksimal tillatt størrelse.')
+                with archive.open(member) as src:
+                    raw = src.read(member.file_size + 1)
+                digest, expected_size = expected[name]
+                if len(raw) != member.file_size or hashlib.sha256(raw).hexdigest() != digest:
+                    raise ApiError('SHA-256-integritet feilet. Ingen dokumenter overskrives.')
+                if len(raw) != expected_size:
+                    warnings.append({'filnavn': name, 'forventet': expected_size, 'faktisk': len(raw),
+                                     'avvik': len(raw) - expected_size})
+                actual.append({'filnavn': name, 'sha256': digest, 'bytes': len(raw),
+                               'expectedBytes': expected_size, 'status': 'HASH_OK'})
+                buffer[name] = raw
+        documents = folder / 'documents'
+        if documents.is_symlink():
+            raise ApiError('Dokumentmappen er en symbolsk lenke. Kontrollen er stoppet.')
+        if documents.exists() and any(documents.iterdir()):
+            # Read-only verification: a completed receipt can be checked again.
+            if {item.name for item in documents.iterdir()} != set(buffer):
+                raise ApiError('Dokumentmappen avviker fra ZIP. Ingen filer endres.')
+            for name, data in buffer.items():
+                actual_file = documents / name
+                if not actual_file.is_file() or actual_file.is_symlink() or actual_file.read_bytes() != data:
+                    raise ApiError('Eksisterende dokument avviker fra ZIP. Ingen filer endres.')
+        else:
+            documents.mkdir(mode=0o700, exist_ok=True)
+            for name, data in buffer.items():
+                with (documents / name).open('xb') as file:
+                    file.write(data)
+        status = 'VERIFIED_WITH_WARNINGS' if warnings else 'VERIFIED'
+        _write_verification(folder, shipment, status, actual,
+                            'SHA-256 stemmer; KS-storrelse avviker.' if warnings else '', warnings=warnings)
+        return {'id': shipment, 'path': str(folder), 'files': len(actual), 'warnings': warnings}
+    except ApiError:
+        raise
+    except (OSError, ValueError, TypeError, zipfile.BadZipFile, RuntimeError):
+        raise ApiError('Lokal kontroll kunne ikke fullfores. Original CMS og ZIP beholdes.') from None
