@@ -1,4 +1,4 @@
-"""Test operations views; no HTTP, key loading or persistence in Tk callbacks."""
+"""KS test views: SvarUt send/status, SvarInn list/download, never acknowledge."""
 from __future__ import annotations
 
 import tkinter as tk
@@ -24,6 +24,7 @@ class ApiViews:
         self.buttons = app.network_buttons
         self.values = {}
         self.incoming_rows = []
+        self.incoming_by_tree_id = {}
         self.outgoing_rows = {}
         self.task = BackgroundTask(app, self._busy_changed)
         self.send_result = tk.StringVar(app, 'Ingen testforsendelse sendt i denne økten.')
@@ -97,13 +98,16 @@ class ApiViews:
         header = ttk.Frame(page, padding=(16, 6))
         header.grid(row=0, column=0, sticky='ew')
         header.columnconfigure(0, weight=1)
-        ttk.Label(header, text='SvarInn - innkommende metadata', style='Heading.TLabel').grid(row=0, column=0, sticky='w')
-        explanation = ttk.Label(header, text='Inntil 200 forsendelser. Ingen nedlasting eller kvittering.', wraplength=850, justify='left')
+        ttk.Label(header, text='SvarInn - innkommende forsendelser', style='Heading.TLabel').grid(row=0, column=0, sticky='w')
+        explanation = ttk.Label(header, text='Velg en forsendelse og last ned. CMS dekrypteres lokalt; filer og SHA-256 kontrolleres. Ingen mottakskvittering sendes.', wraplength=850, justify='left')
         explanation.grid(row=1, column=0, sticky='ew', pady=4)
         actions = ttk.Frame(header)
         actions.grid(row=2, column=0, sticky='w')
         self._button(actions, 'Hent forsendelsesliste', self.list_incoming, row=0, column=0)
-        ttk.Button(actions, text='Gå til Oppsett', command=lambda: self.app.notebook.select(self.app.pages['Oppsett'])).grid(row=0, column=1)
+        # Separate from the four a2 test-action buttons; still locked during any task.
+        self.download_button = ttk.Button(actions, text='Last ned og kontroller valgt', command=self.download_selected)
+        self.download_button.grid(row=0, column=1, padx=(0, 8), pady=4, sticky='w')
+        ttk.Button(actions, text='Gå til Oppsett', command=lambda: self.app.notebook.select(self.app.pages['Oppsett'])).grid(row=0, column=2)
         state = ttk.Label(header, textvariable=self.receive_result, wraplength=850, justify='left')
         state.grid(row=3, column=0, sticky='ew', pady=(4, 0))
         header.bind('<Configure>', lambda e: [w.configure(wraplength=max(220, e.width-32)) for w in (explanation, state)])
@@ -125,12 +129,12 @@ class ApiViews:
         return setup, secrets
 
     def _busy_changed(self, busy):
-        for button in self.buttons:
+        for button in [*self.buttons, self.download_button]:
             button.state(['disabled'] if busy else ['!disabled'])
         if hasattr(self.app, 'clear_session_button'):
             self.app.clear_session_button.state(['disabled'] if busy else ['!disabled'])
         if busy:
-            self.app.status.set('TEST | API-kall pågår. Ikke lukk appen under sending.')
+            self.app.status.set('TEST | API-kall pågår. Ikke lukk appen under handlingen.')
 
     def _run(self, label, work, success, target):
         if self.task.busy:
@@ -169,7 +173,6 @@ class ApiViews:
             return
         values = {k: v.get().strip() for k, v in self.values.items()}
         draft = SendDraft(values['org'], values['name'], values['title'], values['pdf'], values['route'], True)
-        # This is an irreversible request, even in the closed test environment.
         if not messagebox.askyesno('Send i KS-test?',
             'Send én PDF til testorganisasjonen?\n\n' + values['name'] + '\n' + values['org'] + '\n' + values['title'] +
             '\n\nKun digital levering. Ingen automatisk gjentakelse.', parent=self.app):
@@ -185,8 +188,6 @@ class ApiViews:
         snapshot = self.snapshot()
         if snapshot:
             remote_id = self.values['remote_id'].get().strip()
-            # When a history row is selected, do not silently query it under a
-            # newly selected account. Free ID lookup still uses saved account.
             selected = self.history.selection()
             if selected:
                 row = self.outgoing_rows.get(selected[0], {})
@@ -203,15 +204,37 @@ class ApiViews:
         if snapshot is None or self.task.busy:
             return
         self.incoming_rows = []
+        self.incoming_by_tree_id.clear()
         self.incoming.delete(*self.incoming.get_children())
         def success(rows):
             self.incoming_rows = rows
             for row in rows:
-                self.incoming.insert('', 'end', values=(row['id'], row['title'], row['date'], row['files'], row['reference']))
+                item_id = self.incoming.insert('', 'end', values=(row['id'], row['title'], row['date'], row['files'], row['reference']))
+                self.incoming_by_tree_id[item_id] = row
             fit_columns(self.incoming)
             self.receive_result.set('Tilkobling bekreftet. Ingen ventende forsendelser.' if not rows else
-                f'Tilkobling bekreftet. {len(rows)} forsendelser vist. Ingen nedlasting eller kvittering.')
+                f'Tilkobling bekreftet. {len(rows)} forsendelser vist. Velg en rad for kontrollert nedlasting.')
         self._run('Henting av SvarInn-liste', lambda: self.gateway.list_incoming(*snapshot), success, self.receive_result)
+
+    def download_selected(self):
+        selection = self.incoming.selection()
+        if len(selection) != 1 or selection[0] not in self.incoming_by_tree_id:
+            self.receive_result.set('Velg én forsendelse i listen først.')
+            return
+        snapshot = self.snapshot()
+        if snapshot is None or self.task.busy:
+            return
+        selected = self.incoming_by_tree_id[selection[0]]
+        if not messagebox.askyesno('Last ned fra KS test?',
+                'Last ned og dekrypter valgt forsendelse lokalt?\n\n' + selected['id'] +
+                '\n\nIngen mottakskvittering sendes.', parent=self.app):
+            return
+        def success(value):
+            self.receive_result.set('Kontrollert mottak: ' + value['id'] +
+                '\nAntall SHA-256-kontrollerte filer: ' + str(value['files']) +
+                '\nLagringsmappe: ' + value['path'] + '\nIngen kvittering sendt til KS.')
+        self._run('Nedlasting og integritetskontroll',
+                  lambda: self.gateway.receive(*snapshot, selected['metadata']), success, self.receive_result)
 
     def refresh_history(self):
         try:

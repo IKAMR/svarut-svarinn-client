@@ -7,7 +7,7 @@ from .activity import ActivityLog
 from .config import ConfigStore, Setup
 from .paths import AppPaths, StorageError
 from .readiness import Check, inspect_setup
-from .ks_api import TestOperations
+from .a3_operations import DownloadOperations
 
 
 @dataclass(frozen=True)
@@ -23,7 +23,7 @@ class AppService:
         self.store = ConfigStore(paths.setup)
         self.setup = self.store.load_or_create()
         self.activity = ActivityLog(paths.activity)
-        self.gateway = TestOperations(paths, activity=self.activity)
+        self.gateway = DownloadOperations(paths, activity=self.activity)
 
     def save(self, candidate: Setup) -> SaveResult:
         cleaned = Setup.from_dict(candidate.to_dict())
@@ -36,7 +36,6 @@ class AppService:
             try:
                 self.activity.append("setup_saved")
             except StorageError:
-                # Setup is already committed. Do not report it as a failed save.
                 warning = "Oppsettet er lagret, men hendelsen kunne ikke skrives til aktivitetsloggen."
         return SaveResult(changed, warning)
 
